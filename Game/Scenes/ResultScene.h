@@ -1,9 +1,9 @@
 #pragma once
-// リザルトシーン（ヘッダ）
+// リザルト（ベース）
 
 #include "IScene.h"
-#include <string>
 #include "WindowDX.h"
+#include <string>
 
 namespace Engine {
 
@@ -13,17 +13,17 @@ public:
 	void Update() override;
 	void Draw() override;
 
-	bool IsEnd() const override;
-	std::string Next() const override;
+	bool IsEnd() const override { return end_; }
+	std::string Next() const override { return next_; }
 
 private:
+	WindowDX* dx_ = nullptr;
+
 	bool end_ = false;
-	std::string next_;
+	std::string next_{};
 
-WindowDX* dx_ = nullptr;
-
-	bool prevSpace_ = false;
 	bool waitRelease_ = true;
+	bool prevPressed_ = false;
 };
 
 } // namespace Engine
