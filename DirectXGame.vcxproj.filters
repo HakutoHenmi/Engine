@@ -105,13 +105,13 @@
     <ClCompile Include="Game\Actors\Stage.cpp">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClCompile>
+    <ClCompile Include="Game\Actors\ParticleSystem.cpp">
+      <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClCompile>
     <ClCompile Include="Game\Actors\Enemy.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>ソース ファイル\Game\Actor</Filter>
     </ClCompile>
     <ClCompile Include="Game\Actors\EnemyBullet.cpp">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
-    <ClCompile Include="Game\Actors\ParticleSystem.cpp">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClCompile>
   </ItemGroup>
@@ -250,16 +250,16 @@
     <ClInclude Include="Game\Actors\Stage.h">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClInclude>
-    <ClInclude Include="Game\Actors\Enemy.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
-    <ClInclude Include="Game\Actors\EnemyBullet.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
     <ClInclude Include="Game\Actors\Player.h">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClInclude>
     <ClInclude Include="Game\Actors\ParticleSystem.h">
+      <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClInclude>
+    <ClInclude Include="Game\Actors\Enemy.h">
+      <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClInclude>
+    <ClInclude Include="Game\Actors\EnemyBullet.h">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClInclude>
   </ItemGroup>

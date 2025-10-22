@@ -1,33 +1,30 @@
 #pragma once
-// タイトルシーン（ヘッダ）
+// タイトル（ベース）
 
 #include "IScene.h"
-#include <string>
 #include "WindowDX.h"
+#include <string>
 
 namespace Engine {
 
 class TitleScene : public IScene {
 public:
-	// 初期化・更新・描画
-	void Initialize(WindowDX* dx) override; 
+	void Initialize(WindowDX* dx) override;
 	void Update() override;
 	void Draw() override;
 
-	// 遷移管理
-	bool IsEnd() const override;
-	std::string Next() const override;
+	bool IsEnd() const override { return end_; }
+	std::string Next() const override { return next_; }
 
 private:
-	// 遷移フラグ
-	bool end_ = false;
-	std::string next_;
-
 	WindowDX* dx_ = nullptr;
 
-	// 入力のトリガー制御用
-	bool prevSpace_ = false;  // 前フレームの押下状態
-	bool waitRelease_ = true; // 「このシーンに入ってから一度離すまで反応しない」
+	bool end_ = false;
+	std::string next_{};
+
+	// 立ち上がり検出（押しっぱなし無効化）
+	bool waitRelease_ = true;
+	bool prevPressed_ = false;
 };
 
 } // namespace Engine

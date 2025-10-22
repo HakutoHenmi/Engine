@@ -1,9 +1,8 @@
-// リザルトシーン（実装）
+// リザルト（ベース）
 
 #include "ResultScene.h"
 #include <Windows.h>
 #include <Xinput.h>
-#include <windows.h>
 #pragma comment(lib, "xinput9_1_0.lib")
 
 namespace Engine {
@@ -12,43 +11,36 @@ void ResultScene::Initialize(WindowDX* dx) {
 	dx_ = dx;
 	end_ = false;
 	next_.clear();
-	prevSpace_ = false;
 	waitRelease_ = true;
+	prevPressed_ = false;
 }
 
 void ResultScene::Update() {
-	// --- Spaceキー ---
-	SHORT s = GetAsyncKeyState(VK_SPACE);
-	bool nowSpace = (s & 0x8000) != 0;
+	// Space または Pad(A) の立ち上がりで Title へ戻る
+	const bool key = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
 
-	// --- コントローラAボタン ---
 	XINPUT_STATE pad{};
-	bool nowA = false;
+	bool padA = false;
 	if (XInputGetState(0, &pad) == ERROR_SUCCESS) {
-		nowA = (pad.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0;
+		padA = (pad.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0;
 	}
 
-	bool nowPressed = nowSpace || nowA;
+	const bool nowPressed = key || padA;
 
-	// 入りっぱなし防止：離すまで待つ
 	if (waitRelease_) {
 		if (!nowPressed)
 			waitRelease_ = false;
-		prevSpace_ = nowPressed;
+		prevPressed_ = nowPressed;
 		return;
 	}
 
-	// 立ち上がり（Space or A）
-	if (nowPressed && !prevSpace_) {
+	if (nowPressed && !prevPressed_) {
 		end_ = true;
 		next_ = "Title";
 	}
-	prevSpace_ = nowPressed;
+	prevPressed_ = nowPressed;
 }
 
-void ResultScene::Draw() { OutputDebugStringA("=== Result Scene ===\n"); }
-
-bool ResultScene::IsEnd() const { return end_; }
-std::string ResultScene::Next() const { return next_; }
+void ResultScene::Draw() { OutputDebugStringA("== ResultScene (base) ==  Press SPACE or A to go Title\n"); }
 
 } // namespace Engine
