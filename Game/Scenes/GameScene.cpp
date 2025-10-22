@@ -23,7 +23,7 @@ void GameScene::Initialize(WindowDX* dx) {
 	end_ = false;
 	next_.clear();
 
-	// 入力de
+	// 入力
 	input_.Initialize(dx_->GetHInstance(), dx_->GetHwnd());
 
 	// レンダラ
