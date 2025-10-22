@@ -6,6 +6,8 @@
 #include "Renderer.h"
 #include "Stage.h"
 #include "WindowDX.h"
+#include <DirectXMath.h> // ← 追加（XMFLOAT3 用）
+#include <algorithm>     // ← 追加（std::clamp 用）
 
 namespace Engine {
 
@@ -38,6 +40,18 @@ private:
 	std::string next_;
 	bool waitRelease_ = true;
 	bool prevPressed_ = false;
+
+	// === TPSカメラ制御用 ===
+	float camYaw_ = 0.0f;
+	float camPitch_ = 0.3f;
+	float camDist_ = 8.0f;
+	float camHeight_ = 2.0f;
+	DirectX::XMFLOAT3 camPos_{0, 0, 0}; // 現在のカメラ実座標（lerp用）
+
+	// マウスΔを自前で取る（Input に無いので）
+	bool firstMouse_ = true;
+	LONG prevMouseX_ = 0;
+	LONG prevMouseY_ = 0;
 };
 
 } // namespace Engine

@@ -96,6 +96,30 @@ void Player::Update(const Camera& cam, const Input& input) {
 		transform_.translate.z += move.z * speed_;
 		lastMoveDir_ = {move.x, 0.0f, move.z};
 	}
+
+	// === ジャンプ処理 ===
+	if (input.Trigger(DIK_SPACE)) {
+		if (onGround_) {
+			velocityY_ = jumpPower_; // 1段目ジャンプ
+			onGround_ = false;
+			canDoubleJump_ = true;
+		} else if (canDoubleJump_) {
+			velocityY_ = jumpPower_ * 0.9f; // 2段目は少し弱く
+			canDoubleJump_ = false;
+		}
+	}
+
+	// === 重力適用 ===
+	velocityY_ += gravity_ * 0.98f;                // 徐々に落下
+	velocityY_ = (std::max)(velocityY_, -20.0f);   // 落下速度制限
+	transform_.translate.y += velocityY_ * 0.016f; // 1/60秒前提で補正
+
+	// === 地面判定 ===
+	if (transform_.translate.y <= 0.5f) {
+		transform_.translate.y = 0.5f;
+		velocityY_ = 0.5f;
+		onGround_ = true;
+	}
 }
 
 Vector3 Player::GetForwardDir() const {
