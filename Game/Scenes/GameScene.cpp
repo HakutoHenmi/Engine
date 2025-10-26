@@ -44,7 +44,7 @@ void GameScene::Initialize(WindowDX* dx) {
 	player_.Initialize(renderer_, dx_->Dev(), dx_->List());
 
 	// ===============================
-	// 4. Stage 初期化
+	// 4. Stage 初期化/
 	// ===============================
 	stage_.Initialize(renderer_, *dx_, *activeCam_, "Resources/Maps/Stage1_Map.csv", "Resources/Maps/Stage1_Angle.csv", 1.0f, 1.0f, 1.0f, GridAnchor::Center, ModelOrigin::Center, 0.02f, 0.02f);
 
