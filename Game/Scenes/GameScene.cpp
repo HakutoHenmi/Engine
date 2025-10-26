@@ -88,107 +88,160 @@ void GameScene::Update() {
 	player_.Update(*activeCam_, input_);
 	Vector3 newPos = player_.GetPos(); // 移動後
 
-	// === 壁との当たり判定 ===
-	const auto& walls = stage_.GetWallsDynamic(); // ← 正しい関数名
+	// === 壁との当たり判定（半径あり：Collide & Slide） ===
+	const auto& walls = stage_.GetWallsDynamic();
 
-	for (const auto& wall : walls) {
-		float t;
-		Vector3 n;
-		// Segment vs AABB 判定
-		if (Collision::IntersectSegmentAABB(prevPos, newPos, wall, t, n)) {
-			// 衝突点
-			Vector3 hit = {prevPos.x + (newPos.x - prevPos.x) * t, prevPos.y + (newPos.y - prevPos.y) * t, prevPos.z + (newPos.z - prevPos.z) * t};
-			// 少し押し戻し
-			const float pushBack = 0.05f;
-			newPos = {hit.x + n.x * pushBack, hit.y + n.y * pushBack, hit.z + n.z * pushBack};
-			player_.SetPos(newPos);
+	// プレイヤーの当たり半径（見た目に合わせて調整）
+	const float playerRadius = 0.45f;
+
+	auto IsHitExpanded = [&](const AABB& box, const Vector3& p) -> bool {
+		// 壁AABBを半径ぶん膨らませる（めり込み防止）
+		const Vector3 minE{box.min.x - playerRadius, box.min.y - playerRadius, box.min.z - playerRadius};
+		const Vector3 maxE{box.max.x + playerRadius, box.max.y + playerRadius, box.max.z + playerRadius};
+		return (p.x >= minE.x && p.x <= maxE.x) && (p.y >= minE.y && p.y <= maxE.y) && (p.z >= minE.z && p.z <= maxE.z);
+	};
+
+	Vector3 cur = prevPos;
+	Vector3 next = newPos;
+
+	// ---- X軸だけ先に動かして衝突したらXを打ち消す
+	Vector3 tryX = {next.x, cur.y, cur.z};
+	bool hitX = false;
+	for (const auto& w : walls) {
+		if (IsHitExpanded(w, tryX)) {
+			hitX = true;
 			break;
 		}
 	}
+	if (!hitX)
+		cur.x = tryX.x;
+
+	// ---- Z軸も同様（スライド）
+	Vector3 tryZ = {cur.x, cur.y, next.z};
+	bool hitZ = false;
+	for (const auto& w : walls) {
+		if (IsHitExpanded(w, tryZ)) {
+			hitZ = true;
+			break;
+		}
+	}
+	if (!hitZ)
+		cur.z = tryZ.z;
+
+	// ---- Y軸（ジャンプ/落下）
+	Vector3 tryY = {cur.x, next.y, cur.z};
+	bool hitY = false;
+	for (const auto& w : walls) {
+		if (IsHitExpanded(w, tryY)) {
+			hitY = true;
+			break;
+		}
+	}
+	if (!hitY) {
+		cur.y = tryY.y;
+	} else {
+		// Yが衝突したら落下速度を止める（2段ジャンプ安定）
+		player_.SetVelocityY(0.0f); // ← プレイヤー側に用意済み前提
+	}
+
+	// 位置反映
+	player_.SetPos(cur);
 
 	// === ステージ更新 ===
 	stage_.SetPlayerEffect(player_.GetPos(), 6.0f);
 	stage_.Update();
 
-	// === TPS遅延カメラ ===
+	// === TPS遅延カメラ（相対マウス入力 / 画面端でも止まらない） ===
 	if (!useDebugCam_) {
 		using namespace DirectX;
 
-		// === ズーム ===
+		// --- ズーム（ホイール） ---
 		float wheel = input_.GetMouseWheelDelta();
 		if (wheel != 0.0f) {
-			camDist_ -= wheel * 1.0f; // 上に回すとズームイン
+			camDist_ -= wheel * 1.0f; // 上で近づく
 			camDist_ = std::clamp(camDist_, 3.0f, 20.0f);
 		}
 
-		// 1) マウスΔを自前で取得
-		POINT p;
-		GetCursorPos(&p);
-		ScreenToClient(dx_->GetHwnd(), &p);
-		float dx = 0.0f, dy = 0.0f;
-		if (firstMouse_) {
-			prevMouseX_ = p.x;
-			prevMouseY_ = p.y;
-			firstMouse_ = false;
-		} else {
-			dx = float(p.x - prevMouseX_);
-			dy = float(p.y - prevMouseY_);
-			prevMouseX_ = p.x;
-			prevMouseY_ = p.y;
-		}
+		// --- マウス相対移動（DirectInputのΔ。画面端に依存しない） ---
+		const float dx = input_.GetMouseDeltaX();
+		const float dy = input_.GetMouseDeltaY();
 
-		// 2) 角度更新（マウス操作）
+		// --- 角度更新（左右逆・上下逆の指定） ---
 		const float mouseSensitivity = 0.002f;
-		// 符号を反転して操作方向を逆にする
-		camYaw_ -= dx * mouseSensitivity;   // 左右を逆に
-		camPitch_ += dy * mouseSensitivity; // 上下を逆に
-
-		// ピッチ制限（上下）
+		camYaw_ -= dx * mouseSensitivity;   // 左右
+		camPitch_ += dy * mouseSensitivity; // 上下
 		camPitch_ = std::clamp(camPitch_, -1.2f, 1.2f);
 
-		// 3) プレイヤー基準の目標カメラ座標を算出（オービット）
-		const auto playerPos = player_.GetPos(); // Engine::Vector3
-		// Vector3 → XMFLOAT3 に都度展開
+		// --- 追従対象座標 ---
+		const Vector3 playerPos = player_.GetPos();
+
+		// 目標カメラ位置（オービット）
 		const float cx = playerPos.x - std::cos(camYaw_) * std::cos(camPitch_) * camDist_;
 		const float cz = playerPos.z - std::sin(camYaw_) * std::cos(camPitch_) * camDist_;
 		const float cy = playerPos.y + std::sin(camPitch_) * camDist_ + camHeight_;
 		XMFLOAT3 targetCamPos{cx, cy, cz};
 
-		// 4) 遅延追従（lerp は自前の XMFLOAT3 で行う）
+		// ================================
+		// カメラ衝突：球スイープでクリップ防止
+		// ================================
+		const float camRadius = 0.30f; // カメラ球半径
+		const float skin = 0.02f;      // 押し戻し
+
+		Engine::Vector3 eye{playerPos.x, playerPos.y + 1.0f, playerPos.z};
+		Engine::Vector3 desired{targetCamPos.x, targetCamPos.y, targetCamPos.z};
+
+		const auto& camWalls = stage_.GetWallsDynamic();
+
+		float bestT = 1.0f;
+		Engine::Vector3 bestN{0, 0, 0};
+		bool hit = false;
+
+		// 壁AABBをカメラ半径分“膨らませたAABB”に対して線分判定
+		for (const auto& wall : camWalls) {
+			AABB a = wall;
+			a.min.x -= camRadius;
+			a.min.y -= camRadius;
+			a.min.z -= camRadius;
+			a.max.x += camRadius;
+			a.max.y += camRadius;
+			a.max.z += camRadius;
+
+			float t;
+			Engine::Vector3 n;
+			if (Collision::IntersectSegmentAABB(eye, desired, a, t, n)) {
+				if (t < bestT) {
+					bestT = t;
+					bestN = n;
+					hit = true;
+				}
+			}
+		}
+
+		// 衝突していれば手前で止める＋法線方向にskin押し戻し
+		Engine::Vector3 allowed = desired;
+		if (hit) {
+			Engine::Vector3 hitPos{eye.x + (desired.x - eye.x) * bestT, eye.y + (desired.y - eye.y) * bestT, eye.z + (desired.z - eye.z) * bestT};
+			allowed = {hitPos.x - bestN.x * skin, hitPos.y - bestN.y * skin, hitPos.z - bestN.z * skin};
+		}
+
+		// --- 遅延追従（衝突解決後の位置へ） ---
+		XMFLOAT3 noClipTarget{allowed.x, allowed.y, allowed.z};
 		const float followSpeed = 0.15f;
-		camPos_.x += (targetCamPos.x - camPos_.x) * followSpeed;
-		camPos_.y += (targetCamPos.y - camPos_.y) * followSpeed;
-		camPos_.z += (targetCamPos.z - camPos_.z) * followSpeed;
+		camPos_.x += (noClipTarget.x - camPos_.x) * followSpeed;
+		camPos_.y += (noClipTarget.y - camPos_.y) * followSpeed;
+		camPos_.z += (noClipTarget.z - camPos_.z) * followSpeed;
 
-		// 5) カメラへ適用（XMFLOAT3 を渡す）
+		// 反映と注視
 		camPlay_.SetPosition(camPos_);
-
-		// 6) 注視点（XMFLOAT3 で渡す / または float*6 のオーバーロードを使う）
 		XMFLOAT3 lookAt{playerPos.x, playerPos.y + 1.0f, playerPos.z};
 		camPlay_.LookAt(lookAt, XMFLOAT3{0, 1, 0});
-		// もしくは：camPlay_.LookAt(lookAt.x, lookAt.y, lookAt.z, 0, 1, 0);
 	}
 
-	// === シーン遷移 ===
-	bool key = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
-	XINPUT_STATE pad{};
-	bool padA = false;
-	if (XInputGetState(0, &pad) == ERROR_SUCCESS) {
-		padA = (pad.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0;
-	}
-	bool nowPressed = key || padA;
-
-	if (waitRelease_) {
-		if (!nowPressed)
-			waitRelease_ = false;
-		prevPressed_ = nowPressed;
-		return;
-	}
+	// === シーン遷移（Gキーで切替） ===
 	if (input_.Trigger(DIK_G)) {
 		end_ = true;
 		next_ = "Result";
 	}
-	prevPressed_ = nowPressed;
 }
 
 void GameScene::Draw() {

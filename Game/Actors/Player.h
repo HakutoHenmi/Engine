@@ -29,6 +29,10 @@ public:
 	// 進行方向取得（現状は固定）
 	Vector3 GetForwardDir() const;
 
+	void SetVelocityY(float v) { velocityY_ = v; }
+
+	float GetVelocityY() const { return velocityY_; }
+
 	void SetPos(const Vector3& p) { transform_.translate = p; }
 
 	const Transform& GetTransform() const { return transform_; }
@@ -47,8 +51,8 @@ private:
 	bool onGround_ = true;      // 地面についているか
 	bool canDoubleJump_ = true; // 2段目のジャンプ可否
 	float velocityY_ = 0.0f;    // 上下速度
-	float gravity_ = - 5.0f;     // 重力加速度
-	float jumpPower_ = 100.0f;   // ジャンプ初速度
+	float gravity_ = -5.0f;     // 重力加速度
+	float jumpPower_ = 100.0f;  // ジャンプ初速度
 
 	// --- レーザー準備／発射管理 ---
 	bool isCharging_ = false;         // 長押し中（発射準備）
