@@ -27,10 +27,20 @@ jobs:
         with:
           msbuild-architecture: x64
 
-      # DirectXTex をビルド
       - name: Build DirectXTex
         run: msbuild "externals\DirectXTex\DirectXTex_Desktop_2022_Win10.vcxproj" /m /p:Platform=x64 /p:Configuration=${{ matrix.CONFIGURATION }}
 
-      # ソリューションをビルド
+      # DirectXTex.lib を期待フォルダへ配置
+      - name: Place DirectXTex.lib where DirectXGame links it
+        shell: pwsh
+        run: |
+          $cfg='${{ matrix.CONFIGURATION }}'
+          $dst="externals/DirectXTex/Bin/Desktop_2022_Win10/x64/$cfg"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          $found = Get-ChildItem -Recurse -Path externals/DirectXTex -Filter DirectXTex.lib | Select-Object -First 1
+          if (-not $found) { throw "DirectXTex.lib not found after build." }
+          Copy-Item $found.FullName -Destination (Join-Path $dst 'DirectXTex.lib') -Force
+          Write-Host "Placed lib at $dst"
+
       - name: Build solution
         run: msbuild "${{ env.SOLUTION_FILE_PATH }}" /m /p:Platform=x64 /p:Configuration=${{ matrix.CONFIGURATION }}
