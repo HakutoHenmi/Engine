@@ -1,0 +1,37 @@
+name: ReleaseBuild
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # DirectXTex を Release でビルド
+      - name: Build DirectXTex (Release x64)
+        working-directory: ${{ github.workspace }}\externals\DirectXTex
+        run: msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Release /m
+
+      # Development フォルダへ配置（共通参照先）
+      - name: Make Development alias for DirectXTex (use Release lib)
+        shell: pwsh
+        working-directory: ${{ github.workspace }}\externals\DirectXTex\Bin\Desktop_2022_Win10\x64
+        run: |
+          New-Item -ItemType Directory -Force -Path Development | Out-Null
+          Copy-Item -Force Release\DirectXTex.lib Development\DirectXTex.lib
+          Get-ChildItem -Force Development
+
+      # ソリューションを Release でビルド
+      - name: Build solution (Release x64)
+        run: msbuild "DirectXGame.sln" /p:Platform=x64 /p:Configuration=Release /m
