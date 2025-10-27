@@ -14,7 +14,7 @@ using namespace DirectX;
 
 namespace sc = std::chrono;
 
-namespace Engine {
+namespace Engine { 
 
 bool App::Initialize(HINSTANCE hInst, int cmdShow) {
 	sceneManager_.SetDX(&dx_);
