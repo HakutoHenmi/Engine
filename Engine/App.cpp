@@ -23,7 +23,7 @@ bool App::Initialize(HINSTANCE hInst, int cmdShow) {
 	if (!dx_.Initialize(hInst, cmdShow, hwnd_))
 		return false;
 
-	// 2) Input / Camera / Audio
+	// 2) Input / Camera / Audioo
 	input_.Initialize(hInst, hwnd_);
 	camera_.Initialize();
 	if (!audio_.Initialize())
