@@ -23,15 +23,15 @@ jobs:
         working-directory: ${{ github.workspace }}\externals\DirectXTex
         run: msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Debug /m
 
-      # Development を作って .lib をコピー（vcxproj は触らない）
+      # Development に lib を配置（vcxproj 触らない対応）
       - name: Make Development alias for DirectXTex
         shell: pwsh
         working-directory: ${{ github.workspace }}\externals\DirectXTex\Bin\Desktop_2022_Win10\x64
         run: |
           New-Item -ItemType Directory -Force -Path Development | Out-Null
           Copy-Item -Force Debug\DirectXTex.lib Development\DirectXTex.lib
-          Get-ChildItem -Recurse Development
+          Get-ChildItem Development
 
-      # ←ここがポイント：正しい .sln パスに変更
+      # ここがポイント：リポジトリ直下の .sln を指定
       - name: Build solution (Debug x64)
-        run: msbuild "DirectXGame\DirectXGame.sln" /p:Platform=x64 /p:Configuration=Debug /m
+        run: msbuild "DirectXGame.sln" /p:Platform=x64 /p:Configuration=Debug /m
