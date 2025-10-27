@@ -2,13 +2,10 @@ name: DebugBuild
 
 on:
   push:
-    branches:
-      - main
-
-env:
-  # ルート直下にあるためシンプルに指定
-  SOLUTION_FILE_PATH: DirectXGame.sln
-  CONFIGURATION: Debug
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,8 +17,21 @@ jobs:
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
-        with:
-          msbuild-architecture: x64
 
-      - name: Build solution
-        run: msbuild "${{ env.SOLUTION_FILE_PATH }}" /p:Platform=x64 /p:Configuration=${{ env.CONFIGURATION }} /m
+      # DirectXTex を Debug でビルド
+      - name: Build DirectXTex (Debug x64)
+        working-directory: ${{ github.workspace }}\externals\DirectXTex
+        run: msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Debug /m
+
+      # Development を作って .lib をコピー（vcxproj は触らない）
+      - name: Make Development alias for DirectXTex
+        shell: pwsh
+        working-directory: ${{ github.workspace }}\externals\DirectXTex\Bin\Desktop_2022_Win10\x64
+        run: |
+          New-Item -ItemType Directory -Force -Path Development | Out-Null
+          Copy-Item -Force Debug\DirectXTex.lib Development\DirectXTex.lib
+          Get-ChildItem -Recurse Development
+
+      # ←ここがポイント：正しい .sln パスに変更
+      - name: Build solution (Debug x64)
+        run: msbuild "DirectXGame\DirectXGame.sln" /p:Platform=x64 /p:Configuration=Debug /m
