@@ -3,7 +3,7 @@ name: DebugBuild
 on:
   push:
     branches:
-      - master
+      - main
 
 env:
   # ルート直下にあるためシンプルに指定
