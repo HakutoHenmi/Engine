@@ -1,4 +1,4 @@
-name: DebugBuild
+name: ReleaseBuild
 
 on:
   push:
@@ -10,7 +10,6 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,12 +17,12 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # 1) DirectXTex を Release x64 でビルド（/MD, iterator=0 に合わせる）
+      # DirectXTex を Release でビルド（/MD）
       - name: Build DirectXTex (Release x64)
         working-directory: ${{ github.workspace }}\externals\DirectXTex
         run: msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Release /m
 
-      # 2) Development フォルダに lib を配置（vcxproj は Development を参照しているため）
+      # vcxproj が Development を参照しているため、Release の lib を Development に配置
       - name: Make Development alias for DirectXTex (use Release lib)
         shell: pwsh
         working-directory: ${{ github.workspace }}\externals\DirectXTex\Bin\Desktop_2022_Win10\x64
@@ -32,6 +31,6 @@ jobs:
           Copy-Item -Force Release\DirectXTex.lib Development\DirectXTex.lib
           Get-ChildItem -Force Development
 
-      # 3) ソリューションを Debug x64 でビルド
-      - name: Build solution (Debug x64)
-        run: msbuild "DirectXGame.sln" /p:Platform=x64 /p:Configuration=Debug /m
+      # ルートの .sln を Release でビルド
+      - name: Build solution (Release x64)
+        run: msbuild "DirectXGame.sln" /p:Platform=x64 /p:Configuration=Release /m
