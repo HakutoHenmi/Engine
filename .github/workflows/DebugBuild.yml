@@ -7,7 +7,7 @@ on:
 
 env:
   # ルート直下にあるためシンプルに指定
-  SOLUTION_FILE_PATH: CG2_Setup.sln
+  SOLUTION_FILE_PATH: DirectXGame.sln
   CONFIGURATION: Debug
 
 jobs:
