@@ -114,6 +114,9 @@
     <ClCompile Include="Game\Actors\EnemyBullet.cpp">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\AnimationEditor.cpp">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\shaders\SpritePS.hlsl">
@@ -261,6 +264,21 @@
     </ClInclude>
     <ClInclude Include="Game\Actors\EnemyBullet.h">
       <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Animation.h">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\AnimationUtil.h">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\AnimationPlayer.h">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\AnimationJson.h">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\AnimationEditor.h">
+      <Filter>ソース ファイル\Engine</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
