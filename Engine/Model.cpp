@@ -77,13 +77,29 @@ ComPtr<ID3D12Resource> Model::CreateTextureResource(ID3D12Device* device, const 
 
 ComPtr<ID3D12Resource> Model::UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mipImages, ID3D12Device* device, ID3D12GraphicsCommandList* cmd) {
 	std::vector<D3D12_SUBRESOURCE_DATA> subs;
-	DirectX::PrepareUpload(device, mipImages.GetImages(), mipImages.GetImageCount(), mipImages.GetMetadata(), subs);
+	subs.reserve(mipImages.GetImageCount());
 
-	uint64_t interSize = GetRequiredIntermediateSize(texture, 0, UINT(subs.size()));
+	const DirectX::Image* images = mipImages.GetImages();
+	size_t imageCount = mipImages.GetImageCount();
+	// const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
+
+	// === PrepareUpload 互換処理 ===
+	for (size_t i = 0; i < imageCount; ++i) {
+		const DirectX::Image& img = images[i];
+		D3D12_SUBRESOURCE_DATA sub{};
+		sub.pData = img.pixels;
+		sub.RowPitch = img.rowPitch;
+		sub.SlicePitch = img.slicePitch;
+		subs.push_back(sub);
+	}
+
+	// === 中間リソース作成 & 転送 ===
+	uint64_t interSize = GetRequiredIntermediateSize(texture, 0, static_cast<UINT>(subs.size()));
 	ComPtr<ID3D12Resource> inter = CreateBufferResource(device, interSize);
 
-	UpdateSubresources(cmd, texture, inter.Get(), 0, 0, UINT(subs.size()), subs.data());
+	UpdateSubresources(cmd, texture, inter.Get(), 0, 0, static_cast<UINT>(subs.size()), subs.data());
 
+	// === 状態遷移（COPY_DEST → GENERIC_READ） ===
 	D3D12_RESOURCE_BARRIER br{};
 	br.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 	br.Transition.pResource = texture;

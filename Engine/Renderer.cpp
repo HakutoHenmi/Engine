@@ -29,9 +29,6 @@ using namespace DirectX;
 
 namespace Engine {
 
-static constexpr UINT kCBStride = 256; // CBVは256Bアライン
-static constexpr UINT kCBSlots = 8192; // ←★ ここを増やす！（4096～8192が安全）
-
 // ---- HLSL（元ソース踏襲） ----
 // ------------------- OBJ / Model -------------------
 static const char* gVSObj = R"(
@@ -693,56 +690,70 @@ void Renderer::UpdateCB(const Camera& cam, const SpriteTf& spr, const SphereTf& 
 	uv_ = uv;
 	lightDir_ = lightDir;
 
-	// OBJ
+	using namespace DirectX;
+
+	// ===== OBJ =====
 	{
 		CBCommon cb{};
-		cb.col = {1, 1, 1, 1};
+		cb.col = XMFLOAT4(1, 1, 1, 1);
 		XMMATRIX w = XMMatrixIdentity();
 		XMMATRIX v = cam.View();
 		XMMATRIX p = XMMatrixPerspectiveFovLH(XMConvertToRadians(60.f), 1280.f / 720.f, 0.1f, 100.f);
-		cb.mvp = XMMatrixTranspose(w * v * p);
+		XMStoreFloat4x4(&cb.mvp, XMMatrixTranspose(w * v * p));
+
 		void* map = nullptr;
 		mdl_.cb->Map(0, nullptr, &map);
-		memcpy(map, &cb, sizeof(cb));
+		std::memcpy(map, &cb, sizeof(cb));
 		mdl_.cb->Unmap(0, nullptr);
 	}
-	// Sprite
+
+	// ===== Sprite (色 + UVマトリクス) =====
 	{
+		// C0: mvp + col
 		CBCommon cb{};
-		cb.col = sprTf_.c;
+		cb.col = XMFLOAT4(sprTf_.c.x, sprTf_.c.y, sprTf_.c.z, sprTf_.c.w);
 		XMMATRIX w = XMMatrixScaling(sprTf_.s.x, sprTf_.s.y, 1) * XMMatrixTranslation(sprTf_.t.x, sprTf_.t.y, 0);
 		XMMATRIX v = XMMatrixIdentity();
 		XMMATRIX p = XMMatrixOrthographicOffCenterLH(0, 1280.f, 720.f, 0, 0, 1);
-		cb.mvp = XMMatrixTranspose(w * v * p);
-		void* map = nullptr;
-		spr_.cb->Map(0, nullptr, &map);
-		memcpy(map, &cb, sizeof(cb));
-		spr_.cb->Unmap(0, nullptr);
+		XMStoreFloat4x4(&cb.mvp, XMMatrixTranspose(w * v * p));
+		{
+			void* map = nullptr;
+			spr_.cb->Map(0, nullptr, &map);
+			std::memcpy(map, &cb, sizeof(cb));
+			spr_.cb->Unmap(0, nullptr);
+		}
 
-		CBSpriteUV uvCB{XMMatrixTranspose(XMMatrixScaling(uv_.scale.x, uv_.scale.y, 1) * XMMatrixRotationZ(XMConvertToRadians(uv_.rot)) * XMMatrixTranslation(uv_.trans.x, uv_.trans.y, 0))};
-		spr_.cbUv->Map(0, nullptr, &map);
-		memcpy(map, &uvCB, sizeof(uvCB));
+		// C1: uvMat（3x3 を 4x4 に格納）
+		XMMATRIX S = XMMatrixScaling(uv_.scale.x, uv_.scale.y, 1);
+		XMMATRIX R = XMMatrixRotationZ(XMConvertToRadians(uv_.rot));
+		XMMATRIX T = XMMatrixTranslation(uv_.trans.x, uv_.trans.y, 0);
+		XMMATRIX U = S * R * T; // 2D 用
+		XMFLOAT4X4 uvMat{};
+		XMStoreFloat4x4(&uvMat, XMMatrixTranspose(U));
+
+		void* mapUV = nullptr;
+		spr_.cbUv->Map(0, nullptr, &mapUV);
+		std::memcpy(mapUV, &uvMat, sizeof(uvMat)); // CBSpriteUV は XMFLOAT4X4 に直してある
 		spr_.cbUv->Unmap(0, nullptr);
 	}
-	// Sphere
+
+	// ===== Sphere (色 + mvp) =====
 	{
 		CBCommon cb{};
-		cb.col = sphTf_.c;
+		cb.col = XMFLOAT4(sphTf_.c.x, sphTf_.c.y, sphTf_.c.z, sphTf_.c.w);
 		XMMATRIX w = XMMatrixScaling(sphTf_.s.x, sphTf_.s.y, sphTf_.s.z) * XMMatrixRotationRollPitchYaw(sphTf_.r.x, sphTf_.r.y, sphTf_.r.z) * XMMatrixTranslation(sphTf_.t.x, sphTf_.t.y, sphTf_.t.z);
 		XMMATRIX v = cam.View();
 		XMMATRIX p = XMMatrixPerspectiveFovLH(XMConvertToRadians(60.f), 1280.f / 720.f, 0.1f, 100.f);
-		cb.mvp = XMMatrixTranspose(w * v * p);
+		XMStoreFloat4x4(&cb.mvp, XMMatrixTranspose(w * v * p));
+
 		void* map = nullptr;
 		sph_.cb->Map(0, nullptr, &map);
-		memcpy(map, &cb, sizeof(cb));
+		std::memcpy(map, &cb, sizeof(cb));
 		sph_.cb->Unmap(0, nullptr);
 
-		CBLight lcb{
-		    {lightDir_.x, lightDir_.y, lightDir_.z, 0}
-        };
-		sph_.cbLight->Map(0, nullptr, &map);
-		memcpy(map, &lcb, sizeof(lcb));
-		sph_.cbLight->Unmap(0, nullptr);
+		// ライト方向は初期化時に一度書いているが、動かすならここで更新してもOK
+		// CBLight l{ XMFLOAT4(lightDir_.x, lightDir_.y, lightDir_.z, 0) };
+		// ...
 	}
 }
 
@@ -799,25 +810,37 @@ void Renderer::Record(WindowDX& dx, bool useBallTex) {
 	list->DrawIndexedInstanced(6, 1, 0, 0, 0);
 }
 
-//---------------  複数モデル読み込み  -----------------
-
+// =============================
+// 複数モデルの読み込み
+// =============================
 int Renderer::LoadModel(ID3D12Device* device, ID3D12GraphicsCommandList* cmd, const std::string& filepath) {
 	ModelEntry entry;
 	entry.model = std::make_unique<Model>();
 	entry.model->Load(device, cmd, filepath);
 
-	// SRV割り当て
+	// --- SRV割り当て ---
 	int index = nextSrvIndex_++;
 	entry.model->CreateSrv(device, srvHeap_.Get(), descriptorSize_, index);
 	entry.srvGpu = srvHeap_->GetGPUDescriptorHandleForHeapStart();
 	entry.srvGpu.ptr += SIZE_T(index) * descriptorSize_;
 
-	// 定数バッファ
-	entry.cb = Model::CreateBufferResource(device, size_t(kCBStride) * kCBSlots);
-	models_.push_back(std::move(entry));
-	return (int)models_.size() - 1;
-}
+	// --- 定数バッファ確保 ---
+	entry.cb = Model::CreateBufferResource(device, size_t(Renderer::kCBStride) * Renderer::kCBSlots);
 
+	{
+		const D3D12_RANGE readRange{0, 0}; // 読み戻しなし
+		void* p = nullptr;
+		HRESULT hr = entry.cb->Map(0, &readRange, &p);
+		if (SUCCEEDED(hr)) {
+			entry.cbMapped = static_cast<uint8_t*>(p);
+		} else {
+			entry.cbMapped = nullptr;
+		}
+	}
+
+	models_.push_back(std::move(entry));
+	return static_cast<int>(models_.size()) - 1;
+}
 void Renderer::UpdateModelCBWithColor(int handle, const Camera& cam, const Transform& tf, const Vector4& mulColor) {
 	auto& m = models_[handle];
 
@@ -825,14 +848,11 @@ void Renderer::UpdateModelCBWithColor(int handle, const Camera& cam, const Trans
 	XMMATRIX S = XMMatrixScaling(tf.scale.x, tf.scale.y, tf.scale.z);
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(tf.rotate.x, tf.rotate.y, tf.rotate.z);
 	XMMATRIX T = XMMatrixTranslation(tf.translate.x, tf.translate.y, tf.translate.z);
-	XMMATRIX world = S * R * T;
-
-	XMMATRIX vp = cam.View() * cam.Proj();
-	XMMATRIX wvp = XMMatrixTranspose(world * vp);
+	XMMATRIX wvp = XMMatrixTranspose(S * R * T * (cam.View() * cam.Proj()));
 
 	CBCommon cb{};
-	cb.mvp = wvp;
-	cb.col = mulColor; // ★色指定
+	XMStoreFloat4x4(&cb.mvp, wvp); // ← ここが変更点
+	cb.col = XMFLOAT4(mulColor.x, mulColor.y, mulColor.z, mulColor.w);
 
 	void* map = nullptr;
 	m.cb->Map(0, nullptr, &map);
@@ -853,8 +873,6 @@ void Renderer::DrawModel(int handle, ID3D12GraphicsCommandList* cmd) {
 	cmd->SetGraphicsRootSignature(rs_.Get());
 	cmd->SetPipelineState(pso_.Get());
 
-	cmd->SetGraphicsRootSignature(rs_.Get());
-	cmd->SetPipelineState(pso_.Get());
 	cmd->IASetVertexBuffers(0, 1, &m.model->GetVBV());
 	cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	cmd->SetGraphicsRootConstantBufferView(0, m.cb->GetGPUVirtualAddress());
@@ -991,19 +1009,20 @@ void Renderer::DrawGrid(const Camera& cam, ID3D12GraphicsCommandList* cmd, Vecto
 	cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
 	cmd->IASetVertexBuffers(0, 1, &grid_.vbv);
 
-	auto updateCB = [&](const Vector4& col) {
+	auto updateCB = [&](const Vector4& colIn) {
 		struct {
-			DirectX::XMMATRIX mvp;
-			Vector4 col;
+			DirectX::XMFLOAT4X4 mvp;
+			DirectX::XMFLOAT4 col;
 		} cb{};
+
 		const auto w = DirectX::XMMatrixIdentity();
 		const auto vp = cam.View() * cam.Proj();
-		cb.mvp = DirectX::XMMatrixTranspose(w * vp);
-		cb.col = col;
+		DirectX::XMStoreFloat4x4(&cb.mvp, DirectX::XMMatrixTranspose(w * vp));
+		cb.col = DirectX::XMFLOAT4(colIn.x, colIn.y, colIn.z, colIn.w);
 
 		void* map = nullptr;
 		grid_.cb->Map(0, nullptr, &map);
-		memcpy(map, &cb, sizeof(cb));
+		std::memcpy(map, &cb, sizeof(cb));
 		grid_.cb->Unmap(0, nullptr);
 		cmd->SetGraphicsRootConstantBufferView(0, grid_.cb->GetGPUVirtualAddress());
 	};
@@ -1038,28 +1057,25 @@ void Renderer::DrawGrid(const Camera& cam, ID3D12GraphicsCommandList* cmd, Vecto
 
 // スロット指定版
 void Renderer::UpdateModelCBWithColorAt(int handle, size_t slot, const Camera& cam, const Transform& tf, const Vector4& mulColor) {
-
-
+	if (handle < 0 || handle >= (int)models_.size())
+		return;
 	auto& m = models_[handle];
+	if (!m.cb || !m.cbMapped)
+		return;
+	if (slot >= Renderer::kCBSlots)
+		return;
+
 	using namespace DirectX;
-
-	if (!m.cb || slot >= kCBSlots)
-		return; // ← 1024 → kCBSlots に変更
-
-
 	XMMATRIX S = XMMatrixScaling(tf.scale.x, tf.scale.y, tf.scale.z);
 	XMMATRIX R = XMMatrixRotationRollPitchYaw(tf.rotate.x, tf.rotate.y, tf.rotate.z);
 	XMMATRIX T = XMMatrixTranslation(tf.translate.x, tf.translate.y, tf.translate.z);
 	XMMATRIX wvp = XMMatrixTranspose(S * R * T * (cam.View() * cam.Proj()));
 
 	CBCommon cb{};
-	cb.mvp = wvp;
-	cb.col = mulColor;
+	XMStoreFloat4x4(&cb.mvp, wvp); // ← ここが変更点
+	cb.col = XMFLOAT4(mulColor.x, mulColor.y, mulColor.z, mulColor.w);
 
-	uint8_t* base = nullptr;
-	m.cb->Map(0, nullptr, reinterpret_cast<void**>(&base));
-	std::memcpy(base + slot * kCBStride, &cb, sizeof(CBCommon));
-	m.cb->Unmap(0, nullptr);
+	std::memcpy(m.cbMapped + slot * Renderer::kCBStride, &cb, sizeof(CBCommon));
 }
 
 void Renderer::DrawModelAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot) {

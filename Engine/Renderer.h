@@ -19,6 +19,10 @@ namespace Engine {
 
 class Renderer {
 public:
+	// ★ 統一（cpp側の独自定数は廃止）
+	static constexpr size_t kCBSlots = 8192; // リング総スロット数（以前4096⇔8192が混在）
+	static constexpr size_t kCBStride = 256; // 256Bアライン
+
 	// ==== ユーザーが触る構造体（ImGui連携想定） ====
 	struct SpriteTf {
 		Vector3 t{0, 0, 0}, s{1, 1, 1};
@@ -70,7 +74,7 @@ public:
 	ID3D12Device* GetDevice(WindowDX& dx) { return dx.Dev(); }
 	ID3D12GraphicsCommandList* GetCommandList(WindowDX& dx) { return dx.List(); }
 
-	void UpdateModelCBWithColorAt(int handle, size_t slot, const Camera& cam, const Transform& tf, const Vector4& mulColor);
+	void UpdateModelCBWithColorAt(int handle, size_t slot, const Engine::Camera& cam, const Engine::Transform& tf, const Engine::Vector4& mulColor);
 
 	void DrawModelAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot);
 
@@ -88,14 +92,17 @@ public:
 	};
 
 	struct CBCommon {
-		DirectX::XMMATRIX mvp;
-		Vector4 col;
+		DirectX::XMFLOAT4X4 mvp; // ← XMMATRIX ではなく XMFLOAT4X4 に
+		DirectX::XMFLOAT4 col;   // ← 色は col に一本化（mulColor は廃止）
 	};
+	static_assert(sizeof(CBCommon) <= kCBStride, "CBCommon too large for CB stride");
+
 	struct CBSpriteUV {
-		DirectX::XMMATRIX uvMat;
+		DirectX::XMFLOAT4X4 uvMat;
 	};
+
 	struct CBLight {
-		Vector4 dir;
+		DirectX::XMFLOAT4 dir;
 	};
 
 	// OBJ
@@ -159,6 +166,7 @@ public:
 		Microsoft::WRL::ComPtr<ID3D12Resource> cb; // 定数バッファ
 		D3D12_GPU_DESCRIPTOR_HANDLE srvGpu{};
 		Transform transform;
+		uint8_t* cbMapped = nullptr;
 	};
 	std::vector<ModelEntry> models_;
 
@@ -209,11 +217,7 @@ public:
 	void DrawModelNeonFrameAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot);
 
 private:
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoNeonFrame_; // ★追加
-
-	// ★ 追加: クラス内定数として定義（アンダースコア無し）
-	static constexpr size_t kCBSlots = 4096; // リングの総スロット数
-	static constexpr size_t kCBStride = 256; // 1スロットあたりのCBサイズ（256Bアライン）
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoNeonFrame_;
 };
 
 } // namespace Engine
