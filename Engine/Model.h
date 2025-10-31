@@ -1,10 +1,10 @@
 #pragma once
 #include <DirectXMath.h>
+#include <DirectXTex.h>
 #include <d3d12.h>
 #include <string>
 #include <vector>
 #include <wrl.h>
-#include <DirectXTex.h> 
 
 namespace Engine {
 
@@ -34,7 +34,7 @@ public:
 	// rootSrvParamIndex は既定で 2（あなたの RootParameter[2] と一致）
 	void Draw(ID3D12GraphicsCommandList* cmd, UINT rootSrvParamIndex = 1);
 
-	   UINT GetVertexCount() const { return static_cast<UINT>(data_.vertices.size()); }
+	UINT GetVertexCount() const { return static_cast<UINT>(data_.vertices.size()); }
 
 	// 必要なら外から使えるやつ
 	const D3D12_VERTEX_BUFFER_VIEW& GetVBV() const { return vbv_; }
@@ -51,10 +51,7 @@ public:
 	static MaterialData LoadMtl(const std::string& dir, const std::string& mtlFile);
 	static ModelData LoadObj(const std::string& dir, const std::string& objFile);
 
-
 private:
-	
-
 	// ------------ メンバ ------------
 	ModelData data_{};
 	Microsoft::WRL::ComPtr<ID3D12Resource> vb_;
@@ -66,4 +63,4 @@ private:
 	D3D12_GPU_DESCRIPTOR_HANDLE srvGpu_{};
 	bool hasTexture_ = false;
 };
-} // namespace MyNamespace
+} // namespace Engine
