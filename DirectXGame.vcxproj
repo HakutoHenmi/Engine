@@ -84,7 +84,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_WINDOWS;_DEBUG;USE_IMGUI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -113,7 +113,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <Optimization>MinSpace</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -146,7 +146,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <Optimization>Disabled</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -174,6 +174,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Engine\AnimationEditor.cpp" />
     <ClCompile Include="Engine\App.cpp" />
     <ClCompile Include="Engine\Audio.cpp" />
     <ClCompile Include="Engine\Camera.cpp" />
@@ -305,6 +306,11 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <None Include="Resources\shaders\Sprite.hlsli" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Engine\Animation.h" />
+    <ClInclude Include="Engine\AnimationEditor.h" />
+    <ClInclude Include="Engine\AnimationJson.h" />
+    <ClInclude Include="Engine\AnimationPlayer.h" />
+    <ClInclude Include="Engine\AnimationUtil.h" />
     <ClInclude Include="Engine\App.h" />
     <ClInclude Include="Engine\Audio.h" />
     <ClInclude Include="Engine\Camera.h" />
