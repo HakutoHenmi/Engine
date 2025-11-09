@@ -84,7 +84,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_WINDOWS;_DEBUG;USE_IMGUI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)externals\DirectXTex\DirectXTex;$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -94,7 +94,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>DirectXTex.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)externals\DirectXTex\Bin\Desktop_2022_Win10\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)externals\DirectXTex\Bin\Desktop_2022_Win10\x64\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
       <ShaderModel>5.0</ShaderModel>
@@ -113,7 +113,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)externals\DirectXTex\DirectXTex;$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <Optimization>MinSpace</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -127,7 +127,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>DirectXTex.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)externals\DirectXTex\Bin\Desktop_2022_Win10\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)externals\DirectXTex\Bin\Desktop_2022_Win10\x64\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
       <ShaderModel>5.0</ShaderModel>
@@ -146,7 +146,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)externals\DirectXTex\DirectXTex;$(ProjectDir)externals\DirectXTex;$(SolutionDir)externals\DirectXTex\Include;$(ProjectDir)externals\imgui;$(ProjectDir)Engine;$(ProjectDir)Game;$(ProjectDir)Game\Scenes;$(ProjectDir)Game\Actors;$(ProjectDir)Engine\ThirdParty;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <Optimization>Disabled</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -161,7 +161,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>DirectXTex.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)externals\DirectXTex\Bin\Desktop_2022_Win10\$(Platform)\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)externals\DirectXTex\Bin\Desktop_2022_Win10\x64\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration />
     </Link>
     <FxCompile>
@@ -174,7 +174,6 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Engine\AnimationEditor.cpp" />
     <ClCompile Include="Engine\App.cpp" />
     <ClCompile Include="Engine\Audio.cpp" />
     <ClCompile Include="Engine\Camera.cpp" />
@@ -306,11 +305,6 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <None Include="Resources\shaders\Sprite.hlsli" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Engine\Animation.h" />
-    <ClInclude Include="Engine\AnimationEditor.h" />
-    <ClInclude Include="Engine\AnimationJson.h" />
-    <ClInclude Include="Engine\AnimationPlayer.h" />
-    <ClInclude Include="Engine\AnimationUtil.h" />
     <ClInclude Include="Engine\App.h" />
     <ClInclude Include="Engine\Audio.h" />
     <ClInclude Include="Engine\Camera.h" />
