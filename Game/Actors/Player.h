@@ -59,6 +59,17 @@ private:
 	bool firedThisFrame_ = false;     // 今フレーム離して発射した
 	float chargeTime_ = 0.0f;         // 今回の準備経過秒
 	float lastChargeDuration_ = 0.0f; // 直近の準備時間（離した時に確定）
+
+	// --- 緊急回避（ステップ） ---
+	bool dodgeActive_ = false;
+	float dodgeTimer_ = 0.0f;     // 発動中の残り時間
+	float dodgeDuration_ = 0.18f; // 回避の継続時間（秒）
+	float dodgeSpeed_ = 30.0f;    // 回避の速度（m/s）
+	float dodgeCooldown_ = 0.55f; // 次に出せるまでの待ち時間（秒）
+	float dodgeCooldownTimer_ = 0.0f;
+
+	Vector3 dodgeDir_{0, 0, 0}; // 進む方向（XZ 正規化）
+	bool prevRightBtn_ = false; // 右クリックのエッジ検出
 };
 
 } // namespace Engine

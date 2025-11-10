@@ -19,6 +19,12 @@ void Player::Initialize(Engine::Renderer& renderer, ID3D12Device* device, ID3D12
 	transform_.translate = {0, 0.5f, 0};
 	transform_.rotate = {0, 0, 0};
 	transform_.scale = {0.5, 0.5, 0.5};
+
+	dodgeActive_ = false;
+	dodgeTimer_ = 0.0f;
+	dodgeCooldownTimer_ = 0.0f;
+	prevRightBtn_ = false;
+	dodgeDir_ = {0, 0, 0};
 }
 
 // XZ 成分だけにして正規化
@@ -131,19 +137,74 @@ void Player::Update(const Camera& cam, const Input& input) {
 		}
 	}
 
-	// === 進行方向へ回頭（スムージング）===
-	float targetYaw = transform_.rotate.y;
-	if (move.x != 0.0f || move.z != 0.0f) {
-		targetYaw = std::atan2(move.x, move.z); // z前・x右
-	}
-	const float rotateSmooth = 1.0f - std::exp(-12.0f * 0.016f); // ≒ turnSpeed=12
-	transform_.rotate.y = LerpAngle(transform_.rotate.y, targetYaw, rotateSmooth);
+	// 固定フレーム想定（あなたのコードに合わせる）
+	constexpr float dt = 0.016f;
 
-	// === 平行移動 ===
-	if (move.x != 0.0f || move.z != 0.0f) {
-		transform_.translate.x += move.x * speed_;
-		transform_.translate.z += move.z * speed_;
-		lastMoveDir_ = {move.x, 0.0f, move.z};
+	// ==== 右クリック（緊急回避）入力 ====
+	bool rightNow = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+	bool rightTrig = rightNow && !prevRightBtn_;
+	prevRightBtn_ = rightNow;
+
+	// クールタイム消化
+	if (dodgeCooldownTimer_ > 0.0f) {
+		dodgeCooldownTimer_ -= dt;
+		if (dodgeCooldownTimer_ < 0.0f)
+			dodgeCooldownTimer_ = 0.0f;
+	}
+
+	// 発動条件：押下エッジ & 非発動中 & CT終了
+	if (rightTrig && !dodgeActive_ && dodgeCooldownTimer_ <= 0.0f) {
+		// 入力方向が無いときは現在の向きに回避
+		DirectX::XMFLOAT3 dir = move;
+		if (dir.x == 0.0f && dir.z == 0.0f) {
+			// yaw から前方向
+			float s = std::sin(transform_.rotate.y);
+			float c = std::cos(transform_.rotate.y);
+			dir = {s, 0.0f, c};
+		}
+		// 正規化（安全）
+		float len = std::sqrt(dir.x * dir.x + dir.z * dir.z);
+		if (len > 1e-6f) {
+			dir.x /= len;
+			dir.z /= len;
+		} else {
+			dir = {0.0f, 0.0f, 1.0f};
+		}
+
+		dodgeDir_ = {dir.x, 0.0f, dir.z};
+		dodgeActive_ = true;
+		dodgeTimer_ = dodgeDuration_;
+		dodgeCooldownTimer_ = dodgeCooldown_;
+	}
+
+	// ==== 進行方向へ回頭（回避中は回避方向へ向ける）====
+	{
+		float targetYaw = transform_.rotate.y;
+		if (dodgeActive_) {
+			targetYaw = std::atan2(dodgeDir_.x, dodgeDir_.z);
+		} else if (move.x != 0.0f || move.z != 0.0f) {
+			targetYaw = std::atan2(move.x, move.z);
+		}
+		const float rotateSmooth = 1.0f - std::exp(-12.0f * dt);
+		transform_.rotate.y = LerpAngle(transform_.rotate.y, targetYaw, rotateSmooth);
+	}
+
+	// ==== 平行移動 ====
+	// 回避中は通常移動を無効化し、回避移動のみ行う
+	if (dodgeActive_) {
+		transform_.translate.x += dodgeDir_.x * dodgeSpeed_ * dt;
+		transform_.translate.z += dodgeDir_.z * dodgeSpeed_ * dt;
+
+		dodgeTimer_ -= dt;
+		if (dodgeTimer_ <= 0.0f) {
+			dodgeActive_ = false;
+		}
+	} else {
+		if (move.x != 0.0f || move.z != 0.0f) {
+			transform_.translate.x += move.x * speed_;
+			transform_.translate.z += move.z * speed_;
+			lastMoveDir_ = {move.x, 0.0f, move.z};
+		}
 	}
 
 	// === ジャンプ（元のまま）===
