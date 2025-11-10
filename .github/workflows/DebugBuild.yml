@@ -12,61 +12,53 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # --- リポジトリ取得---
+      # --- リポ + サブモジュール ---
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive   # ★ 重要
+          submodules: recursive
 
-      # --- 念のため：サブモジュールが無い場合はここで初期化 ---
       - name: Ensure submodules present
         shell: pwsh
         run: |
           git submodule sync --recursive
           git submodule update --init --recursive
 
-      # --- MSBuild を PATH へ ---
+      # --- MSBuild を PATH に ---
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
       # --- DirectXTex を Release x64 でビルド ---
       - name: Build DirectXTex (Release x64)
         shell: pwsh
-        working-directory: ${{ github.workspace }}\externals\DirectXTex
-        run: |
-          if (!(Test-Path .)) { throw "externals/DirectXTex not found" }
-          msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Release /m
+        working-directory: ${{ github.workspace }}\CG\externals\DirectXTex   # ★ ここがポイント
+        run: msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Release /m
 
-      # --- Development エイリアスを作成（Release lib をコピー）---
-      #     Bin\ の下の“どのフォルダ階層でも” DirectXTex.lib を見つけて Development に複製します
+      # --- Release lib を Development エイリアスへ複製 ---
       - name: Make Development alias for DirectXTex (use Release lib)
         shell: pwsh
         run: |
-          $root = Join-Path $env:GITHUB_WORKSPACE 'externals\DirectXTex\Bin'
-          if (!(Test-Path $root)) { throw "DirectXTex\Bin not found" }
+          $root = Join-Path $env:GITHUB_WORKSPACE 'CG\externals\DirectXTex\Bin'
+          if (!(Test-Path $root)) { throw "DirectXTex\Bin not found: $root" }
 
-          # Release の DirectXTex.lib を検索（Desktop_2022 / Desktop_2022_Win10 など差異を許容）
           $lib = Get-ChildItem -Path $root -Recurse -Filter DirectXTex.lib |
                  Where-Object { $_.FullName -match '\\x64\\' -and $_.FullName -match '\\Release\\' } |
                  Select-Object -First 1
 
           if ($null -eq $lib) {
-            Write-Host "Found libs:"
+            Write-Host "Found libs (for debug):"
             Get-ChildItem -Path $root -Recurse -Filter DirectXTex.lib | ForEach-Object { $_.FullName }
             throw "DirectXTex.lib (x64/Release) not found under $root"
           }
 
-          # Development ディレクトリを作成し、Release の lib をコピー
           $devDir = Split-Path $lib.DirectoryName -Parent | Join-Path -ChildPath 'Development'
           New-Item -ItemType Directory -Force -Path $devDir | Out-Null
           Copy-Item -Force $lib.FullName (Join-Path $devDir 'DirectXTex.lib')
-
-          Write-Host "Copied:"
-          Get-ChildItem -Force $devDir
+          Write-Host "Copied DirectXTex.lib to: $devDir"
 
       # --- ソリューションを Release x64 でビルド ---
       - name: Build solution (Release x64)
         shell: pwsh
-        working-directory: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}\CG                 # ★ .sln は CG/ にある
         run: msbuild "DirectXGame.sln" /p:Platform=x64 /p:Configuration=Release /m
