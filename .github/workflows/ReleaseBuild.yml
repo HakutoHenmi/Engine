@@ -10,28 +10,57 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      APP_CONFIG: Release
+      APP_PLATFORM: x64
 
     steps:
-      - name: Checkout
+      - name: Checkout (with submodules)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Ensure submodules present
+        shell: pwsh
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # DirectXTex を Release でビルド
-      - name: Build DirectXTex (Release x64)
-        working-directory: ${{ github.workspace }}\externals\DirectXTex
-        run: msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Release /m
-
-      # Development フォルダへ配置（共通参照先）
-      - name: Make Development alias for DirectXTex (use Release lib)
+      - name: Locate & build DirectXTex (${{ env.APP_CONFIG }} ${{ env.APP_PLATFORM }})
         shell: pwsh
-        working-directory: ${{ github.workspace }}\externals\DirectXTex\Bin\Desktop_2022_Win10\x64
         run: |
-          New-Item -ItemType Directory -Force -Path Development | Out-Null
-          Copy-Item -Force Release\DirectXTex.lib Development\DirectXTex.lib
-          Get-ChildItem -Force Development
+          $dxproj = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter DirectXTex_Desktop_2022_Win10.vcxproj | Select-Object -First 1
+          if (-not $dxproj) { throw "DirectXTex_Desktop_2022_Win10.vcxproj not found." }
+          Push-Location $dxproj.DirectoryName
+          msbuild $dxproj.Name /p:Platform=${{ env.APP_PLATFORM }} /p:Configuration=${{ env.APP_CONFIG }} /m
+          Pop-Location
 
-      # ソリューションを Release でビルド
-      - name: Build solution (Release x64)
-        run: msbuild "DirectXGame.sln" /p:Platform=x64 /p:Configuration=Release /m
+      - name: Make Development alias for DirectXTex (use matching config)
+        shell: pwsh
+        run: |
+          $binRoot = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Directory -Filter Bin |
+            Where-Object { $_.FullName -match 'DirectXTex\\Bin$' } |
+            Select-Object -First 1
+          if (-not $binRoot) { throw "DirectXTex\\Bin not found." }
+
+          $lib = Get-ChildItem -Path $binRoot.FullName -Recurse -Filter DirectXTex.lib |
+              Where-Object { $_.FullName -match '\\${{ env.APP_PLATFORM }}\\' -and $_.FullName -match "\\${{ env.APP_CONFIG }}\\" } |
+              Select-Object -First 1
+          if (-not $lib) { throw "DirectXTex.lib (${{ env.APP_PLATFORM }}/${{ env.APP_CONFIG }}) not found." }
+
+          $devDir = Join-Path (Split-Path $lib.DirectoryName -Parent) 'Development'
+          New-Item -ItemType Directory -Force -Path $devDir | Out-Null
+          Copy-Item -Force $lib.FullName (Join-Path $devDir 'DirectXTex.lib')
+
+      - name: Locate solution & build (${{ env.APP_CONFIG }} ${{ env.APP_PLATFORM }})
+        shell: pwsh
+        run: |
+          $sln = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter 'DirectXGame.sln' | Select-Object -First 1
+          if (-not $sln) { throw "DirectXGame.sln not found." }
+          Push-Location $sln.DirectoryName
+          msbuild $sln.Name /p:Platform=${{ env.APP_PLATFORM }} /p:Configuration=${{ env.APP_CONFIG }} /m
+          Pop-Location

@@ -31,10 +31,17 @@ void Player::Initialize(Engine::Renderer& renderer, ID3D12Device* device, ID3D12
 	meleeCooldownTimer_ = 0.0f;
 	prevLeftBtn_ = false;
 
-	// 握り位置（プレイヤー原点からのローカルオフセット）
-	swordLocal_.translate = {+0.35f, 0.85f, +0.15f}; // 右手・少し前
-	swordLocal_.rotate = {0.0f, 0.0f, 0.0f};
-	swordLocal_.scale = {1.0f, 1.0f, 1.0f};
+	// ★ 剣の位置：プレイヤーの真正面（前方）に出す
+	swordLocal_.translate = {0.0f, 0.90f, 0.62f}; // 高さ0.9m、前に0.62m
+
+	// ★ 回転：Xを -90°（+Y→+Z補正）に加えて、Yを 180° 反転
+	//   → モデルの「前」を反転させる
+	swordLocal_.rotate.x = -DirectX::XM_PIDIV2;
+	swordLocal_.rotate.y = DirectX::XM_PI; // ★ 180°回転を追加
+	swordLocal_.rotate.z = 0.0f;
+
+	// 見た目スケール（長め）
+	swordLocal_.scale = {0.20f, 0.20f, 0.38f};
 }
 
 // XZ 成分だけにして正規化
@@ -242,15 +249,20 @@ void Player::Update(const Camera& cam, const Input& input) {
 
 	// 剣の基準姿勢（プレイヤーに追従）
 	auto MakeSwordWorld = [&](float yawRad, float addYawDeg) -> Transform {
-		Transform t = swordLocal_;
-		// yaw でプレイヤーに追従 + 追加のスイング角
-		t.rotate.y += yawRad + DirectX::XMConvertToRadians(addYawDeg);
-		// ワールドへ：原始的な“プレイヤー原点 + 回転したローカル”でOK
-		// ここでは簡略に「平面回転のみ」(XZ回り)
-		float s = std::sin(yawRad);
-		float c = std::cos(yawRad);
-		Vector3 off = swordLocal_.translate;
-		Vector3 rotOff{off.x * c - off.z * s, off.y, off.x * s + off.z * c};
+		Transform t = swordLocal_; // ローカル姿勢（X=-90°, scale 含む）
+
+		// スイング等の追加角（ローカルY）
+		t.rotate.y += DirectX::XMConvertToRadians(addYawDeg);
+
+		// プレイヤーのYawを加算（水平回転）
+		t.rotate.y += yawRad;
+
+		// ★ローカル位置は X を常に0として前方(Z)だけ回す＝必ず中央から出る
+		const float up = swordLocal_.translate.y;
+		const float fwd = swordLocal_.translate.z;
+		float s = std::sin(yawRad), c = std::cos(yawRad);
+		Engine::Vector3 rotOff{-fwd * s, up, +fwd * c};
+
 		t.translate.x = transform_.translate.x + rotOff.x;
 		t.translate.y = transform_.translate.y + rotOff.y;
 		t.translate.z = transform_.translate.z + rotOff.z;
@@ -275,17 +287,16 @@ void Player::Update(const Camera& cam, const Input& input) {
 
 		// 当たりが出るフレーム（中央～後半あたり）
 		if (t > 0.25f && t < 0.70f) {
-			// 刃の軌跡をカプセルで近似：柄(根本)と先端の2点
-			// 剣の長さ・厚みの仮定
-			const float bladeLen = 1.2f; // m
+			// 刃の長さ（見た目に合わせて長めに）
+			const float bladeLen = 1.35f; // ← 以前より長く
 			const float gripToTip = bladeLen;
 
 			Transform tmp = MakeSwordWorld(yaw, addDeg);
 
-			// 柄（剣の付け根）= swordTf_ 位置付近
+			// 柄（剣の付け根）
 			Vector3 h = tmp.translate;
 
-			// 先端 = 剣ローカルの +Z 方向に bladeLen（見た目を合わせて調整）
+			// 先端 = 水平Yaw方向へ bladeLen
 			float sy = tmp.rotate.y;
 			float ss = std::sin(sy), sc = std::cos(sy);
 			Vector3 tip{h.x + sc * gripToTip, h.y, h.z + ss * gripToTip};
@@ -300,7 +311,7 @@ void Player::Update(const Camera& cam, const Input& input) {
 
 	} else {
 		// 待機時の剣（腰の横に下げる/少し前に構える などお好みで）
-		swordTf_ = MakeSwordWorld(yaw, -20.0f);
+		swordTf_ = MakeSwordWorld(yaw, -10.0f);
 	}
 
 	// === ジャンプ（元のまま）===
@@ -335,9 +346,16 @@ Vector3 Player::GetForwardDir() const {
 }
 
 void Player::Draw(Engine::Renderer& renderer, const Camera& cam, ID3D12GraphicsCommandList* cmd) {
+	// 本体
 	if (modelHandle_ >= 0) {
-		renderer.UpdateModelCBWithColor(modelHandle_, cam, transform_, {1, 1, 1, 1});
+		renderer.UpdateModelCBWithColor(modelHandle_, cam, transform_, Engine::Vector4{1, 1, 1, 1});
 		renderer.DrawModel(modelHandle_, cmd);
+	}
+
+	// ★常に描画（ハンドルが有効なら）
+	if (swordHandle_ >= 0) {
+		renderer.UpdateModelCBWithColor(swordHandle_, cam, swordTf_, Engine::Vector4{1, 1, 1, 1});
+		renderer.DrawModel(swordHandle_, cmd);
 	}
 }
 

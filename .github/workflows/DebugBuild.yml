@@ -1,4 +1,4 @@
-name: ReleaseBuild
+name: DebugBuild
 
 on:
   push:
@@ -10,10 +10,12 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      APP_CONFIG: Debug
+      APP_PLATFORM: x64
 
     steps:
-      # --- リポ + サブモジュール ---
-      - name: Checkout
+      - name: Checkout (with submodules)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -25,40 +27,57 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive
 
-      # --- MSBuild を PATH に ---
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      # --- DirectXTex を Release x64 でビルド ---
-      - name: Build DirectXTex (Release x64)
-        shell: pwsh
-        working-directory: ${{ github.workspace }}\CG\externals\DirectXTex   # ★ ここがポイント
-        run: msbuild DirectXTex_Desktop_2022_Win10.vcxproj /p:Platform=x64 /p:Configuration=Release /m
-
-      # --- Release lib を Development エイリアスへ複製 ---
-      - name: Make Development alias for DirectXTex (use Release lib)
+      - name: Echo workspace (debug)
         shell: pwsh
         run: |
-          $root = Join-Path $env:GITHUB_WORKSPACE 'CG\externals\DirectXTex\Bin'
-          if (!(Test-Path $root)) { throw "DirectXTex\Bin not found: $root" }
+          Write-Host "WORKSPACE=$env:GITHUB_WORKSPACE"
+          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Depth 2 | Select-Object FullName
 
-          $lib = Get-ChildItem -Path $root -Recurse -Filter DirectXTex.lib |
-                 Where-Object { $_.FullName -match '\\x64\\' -and $_.FullName -match '\\Release\\' } |
-                 Select-Object -First 1
+      # --- DirectXTex を探索して同じ構成でビルド ---
+      - name: Locate & build DirectXTex (${{ env.APP_CONFIG }} ${{ env.APP_PLATFORM }})
+        shell: pwsh
+        run: |
+          $dxproj = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter DirectXTex_Desktop_2022_Win10.vcxproj | Select-Object -First 1
+          if (-not $dxproj) { throw "DirectXTex_Desktop_2022_Win10.vcxproj not found." }
+          Write-Host "DirectXTex vcxproj: $($dxproj.FullName)"
+          Push-Location $dxproj.DirectoryName
+          msbuild $dxproj.Name /p:Platform=${{ env.APP_PLATFORM }} /p:Configuration=${{ env.APP_CONFIG }} /m
+          Pop-Location
 
-          if ($null -eq $lib) {
-            Write-Host "Found libs (for debug):"
-            Get-ChildItem -Path $root -Recurse -Filter DirectXTex.lib | ForEach-Object { $_.FullName }
-            throw "DirectXTex.lib (x64/Release) not found under $root"
+      # --- 同じ構成の lib を Development へコピー（エイリアス作成）---
+      - name: Make Development alias for DirectXTex (use matching config)
+        shell: pwsh
+        run: |
+          # DirectXTex\Bin を探索
+          $binRoot = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Directory -Filter Bin |
+            Where-Object { $_.FullName -match 'DirectXTex\\Bin$' } |
+            Select-Object -First 1
+          if (-not $binRoot) { throw "DirectXTex\\Bin not found." }
+
+          # 構成一致の lib を取得
+          $lib = Get-ChildItem -Path $binRoot.FullName -Recurse -Filter DirectXTex.lib |
+              Where-Object { $_.FullName -match '\\${{ env.APP_PLATFORM }}\\' -and $_.FullName -match "\\${{ env.APP_CONFIG }}\\" } |
+              Select-Object -First 1
+          if (-not $lib) {
+            Write-Host "Found DirectXTex.lib list for debug:"
+            Get-ChildItem -Path $binRoot.FullName -Recurse -Filter DirectXTex.lib | ForEach-Object { $_.FullName }
+            throw "DirectXTex.lib (${{ env.APP_PLATFORM }}/${{ env.APP_CONFIG }}) not found."
           }
-
-          $devDir = Split-Path $lib.DirectoryName -Parent | Join-Path -ChildPath 'Development'
+          $devDir = Join-Path (Split-Path $lib.DirectoryName -Parent) 'Development'
           New-Item -ItemType Directory -Force -Path $devDir | Out-Null
           Copy-Item -Force $lib.FullName (Join-Path $devDir 'DirectXTex.lib')
-          Write-Host "Copied DirectXTex.lib to: $devDir"
+          Write-Host "Aliased: $($lib.FullName) -> $devDir\\DirectXTex.lib"
 
-      # --- ソリューションを Release x64 でビルド ---
-      - name: Build solution (Release x64)
+      # --- .sln を探索して同じ構成でビルド ---
+      - name: Locate solution & build (${{ env.APP_CONFIG }} ${{ env.APP_PLATFORM }})
         shell: pwsh
-        working-directory: ${{ github.workspace }}\CG                 # ★ .sln は CG/ にある
-        run: msbuild "DirectXGame.sln" /p:Platform=x64 /p:Configuration=Release /m
+        run: |
+          $sln = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter 'DirectXGame.sln' | Select-Object -First 1
+          if (-not $sln) { throw "DirectXGame.sln not found." }
+          Write-Host "Solution: $($sln.FullName)"
+          Push-Location $sln.DirectoryName
+          msbuild $sln.Name /p:Platform=${{ env.APP_PLATFORM }} /p:Configuration=${{ env.APP_CONFIG }} /m
+          Pop-Location
