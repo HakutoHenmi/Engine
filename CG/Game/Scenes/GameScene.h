@@ -2,6 +2,7 @@
 #include "Camera.h"
 #include "IScene.h"
 #include "Input.h"
+#include "ParticleEmitter.h"
 #include "Player.h"
 #include "Renderer.h"
 #include "Stage.h"
@@ -16,6 +17,8 @@ public:
 	void Initialize(WindowDX* dx) override;
 	void Update() override;
 	void Draw() override;
+
+	Game::ParticleEmitter sparks_; // 火花エミッタ
 
 	bool IsEnd() const override { return end_; }
 	std::string Next() const override { return next_; }
@@ -52,6 +55,8 @@ private:
 	bool firstMouse_ = true;
 	LONG prevMouseX_ = 0;
 	LONG prevMouseY_ = 0;
+
+	bool prevRB_ = false; // 右クリックの前フレーム状態
 };
 
 } // namespace Engine
