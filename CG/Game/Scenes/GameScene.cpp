@@ -45,6 +45,21 @@ void GameScene::Initialize(WindowDX* dx) {
 	int sword = renderer_.LoadModel(dx_->Dev(), dx_->List(), "Resources/weapons/sword.obj");
 	player_.SetSwordModel(sword);
 
+	// パーティクル
+	sparks_.Initialize(renderer_, *dx_, 6000); // 2000枚まで
+	sparks_.SetPosition({0, 1.0f, 0});
+	auto& p = sparks_.Params();
+	p.maxOnce = 256;
+	p.useAdditive = true;
+	p.initColor = {1.0f, 0.85f, 0.35f, 1.0f};
+	p.initScaleMin = {0.35f, 0.35f, 0.35f};
+	p.initScaleMax = {0.55f, 0.55f, 0.55f};
+	p.lifeMin = 0.30f;
+	p.lifeMax = 0.55f;
+	p.initVelMin = {-1.6f, 2.8f, -1.6f};
+	p.initVelMax = {+1.6f, 5.0f, +1.6f};
+	p.spawnPosJitter = {0.40f, 0.60f, 0.40f};
+
 	// ===============================
 	// 4. Stage 初期化
 	// ===============================
@@ -149,6 +164,27 @@ void GameScene::Update() {
 	// 位置反映
 	player_.SetPos(cur);
 
+	// === 右クリックで板ポリパーティクル大量発生 ===
+	const bool rbNow = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+	if (rbNow) {
+		// 出す位置：プレイヤーの少し前＆少し上
+		Engine::Vector3 pos = player_.GetPos();
+		// プレイヤー前方へ 0.8m・上へ 0.6m（大きく散らすので中心だけ上げる）
+		// 前方はカメラ向きでもOK：ここではカメラ前方を使う
+		const float cy = std::cos(camYaw_), sy = std::sin(camYaw_);
+		pos.x += cy * 0.8f;
+		pos.z += sy * 0.8f;
+		pos.y += 0.6f;
+		sparks_.SetPosition(pos);
+		// 毎フレ複数回バーストして“ドバッ”と出す
+		sparks_.Burst(256);
+		sparks_.Burst(256);
+		if (!prevRB_) {
+			sparks_.Burst(512);
+		}
+	}
+	prevRB_ = rbNow;
+
 	// === ステージ更新 ===
 	stage_.SetPlayerEffect(player_.GetPos(), 6.0f);
 	stage_.Update();
@@ -244,6 +280,8 @@ void GameScene::Update() {
 		end_ = true;
 		next_ = "Result";
 	}
+
+	sparks_.Update(1.0f / 60.0f);
 }
 
 void GameScene::Draw() {
@@ -263,6 +301,8 @@ void GameScene::Draw() {
 
 	// プレイヤー
 	player_.Draw(renderer_, *activeCam_, cmd);
+
+	sparks_.Draw(cmd, *activeCam_);
 
 	// Renderer EndFrame（Closeしない）
 	renderer_.EndFrame(cmd);
