@@ -75,6 +75,9 @@ private:
 	float gravity_ = -5.0f;     // 重力加速度
 	float jumpPower_ = 100.0f;  // ジャンプ初速度
 
+	Renderer* renderer_ = nullptr;    // ← 参照だけ保持
+	float standingHalfHeight_ = 0.5f; // モデルの“足元→中心”高さ（必要に応じて調整）
+
 	// --- レーザー準備／発射管理 ---
 	bool isCharging_ = false;         // 長押し中（発射準備）
 	bool firedThisFrame_ = false;     // 今フレーム離して発射した
@@ -142,7 +145,6 @@ private:
 
 	// 剣の最終ワールド姿勢を作る（位置は“常に前側”、向きは yaw+addYawDeg）
 	Transform MakeSwordWorld_(float yawRad, float addYawDeg, float tiltZDeg = 0.0f, float pitchXDeg = 0.0f) const;
-
 };
 
 } // namespace Engine

@@ -246,6 +246,10 @@ public: // （外からも参照することが多いので public に）
 		} params{};
 	} voxel_;
 
+	// 現在のボクセル地形パラメータから、任意XZにおける高さ/法線を返す
+	float TerrainHeightAt(float x, float z) const;
+	Vector3 TerrainNormalAt(float x, float z) const;
+
 	// 4B の 0 を置いたアップロード（UAVカウンタ初期化に使う）
 	Microsoft::WRL::ComPtr<ID3D12Resource> zeroUpload_;
 };

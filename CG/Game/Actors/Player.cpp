@@ -13,6 +13,7 @@ namespace Engine {
 using namespace DirectX;
 
 void Player::Initialize(Engine::Renderer& renderer, ID3D12Device* device, ID3D12GraphicsCommandList* cmd) {
+	renderer_ = &renderer;
 	modelHandle_ = renderer.LoadModel(device, cmd, "Resources/cube/cube.obj");
 	OutputDebugStringA(("Player modelHandle=" + std::to_string(modelHandle_) + "\n").c_str());
 
@@ -451,10 +452,34 @@ void Player::Update(const Camera& cam, const Input& input) {
 	transform_.translate.y += velocityY_ * 0.016f;
 
 	// ==== 地面判定 ====
-	if (transform_.translate.y <= 0.5f) {
-		transform_.translate.y = 0.5f;
-		velocityY_ = 0.5f;
-		onGround_ = true;
+	{
+		// Renderer が無ければ従来挙動にフォールバック
+		if (!renderer_) {
+			if (transform_.translate.y <= 0.5f) {
+				transform_.translate.y = 0.5f;
+				velocityY_ = 0.0f;
+				onGround_ = true;
+			}
+		} else {
+			const float x = transform_.translate.x;
+			const float z = transform_.translate.z;
+
+			// 足元地形の高さ（ワールド）
+			const float h = renderer_->TerrainHeightAt(x, z);
+			const float floorY = h + standingHalfHeight_;
+
+			if (transform_.translate.y <= floorY) {
+				transform_.translate.y = floorY;
+				velocityY_ = 0.0f;
+				onGround_ = true;
+
+				// （任意）斜面での引っ掛かり軽減：地面法線へ少し沿わせる
+				// Vector3 n = renderer_->TerrainNormalAt(x, z);
+				// // 水平移動成分から法線成分を引いて滑らせるなどの拡張も可能
+			} else {
+				onGround_ = false;
+			}
+		}
 	}
 }
 

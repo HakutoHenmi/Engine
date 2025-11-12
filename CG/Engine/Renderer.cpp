@@ -1750,4 +1750,42 @@ bool Renderer::InitLaserPSO(ID3D12Device* device, ID3D12RootSignature* rs) {
 	return SUCCEEDED(hr);
 }
 
+// CS内の h(xz) と同じ式をCPUにも再現
+static inline float VoxelHeightFunc_CPU(float x, float z, float amp, float freq) {
+	float f = freq;
+	float a = amp;
+	float v = 0.0f;
+	v += a * 0.60f * (sinf(x * (f * 1.00f) + 0.9f) + cosf(z * (f * 1.02f) + 1.7f)) * 0.5f;
+	v += a * 0.25f * (sinf(x * (f * 2.05f) + 3.2f) + cosf(z * (f * 1.98f) + 2.4f)) * 0.5f;
+	v += a * 0.15f * (sinf(x * (f * 3.95f) + 5.4f) + cosf(z * (f * 4.10f) + 4.1f)) * 0.5f;
+	return v;
+}
+
+float Renderer::TerrainHeightAt(float x, float z) const {
+	const float amp = voxel_.params.amp;
+	const float freq = voxel_.params.freq;
+	return VoxelHeightFunc_CPU(x, z, amp, freq);
+}
+
+Vector3 Renderer::TerrainNormalAt(float x, float z) const {
+	const float cell = voxel_.params.cell;
+	const float amp = voxel_.params.amp;
+	const float freq = voxel_.params.freq;
+	const float eps = cell;
+
+	auto h = [&](float X, float Z) { return VoxelHeightFunc_CPU(X, Z, amp, freq); };
+
+	float hx = h(x + eps, z) - h(x - eps, z);
+	float hz = h(x, z + eps) - h(x, z - eps);
+	Vector3 n = {-hx, 2.0f * eps, -hz};
+
+	const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+	if (len > 1e-6f) {
+		n.x /= len;
+		n.y /= len;
+		n.z /= len;
+	}
+	return n;
+}
+
 } // namespace Engine
