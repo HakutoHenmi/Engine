@@ -45,9 +45,9 @@ static ID3D12Resource* CreateDepth(ID3D12Device* dev, UINT w, UINT h) {
 	CD3DX12_HEAP_PROPERTIES hp(D3D12_HEAP_TYPE_DEFAULT);
 	ID3D12Resource* res{};
 	HRESULT hr = dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_DEPTH_WRITE, &cv, IID_PPV_ARGS(&res));
-	//assert(SUCCEEDED(hr));
+	// assert(SUCCEEDED(hr));
 
-	   if (FAILED(hr)) {
+	if (FAILED(hr)) {
 		char buf[256];
 		sprintf_s(buf, "CreateDepth failed! hr=0x%08X (w=%u, h=%u)\n", hr, w, h);
 		OutputDebugStringA(buf);
@@ -77,7 +77,7 @@ LRESULT CALLBACK WindowDX::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 // ------------------------ Initialize ------------------------
 bool WindowDX::Initialize(HINSTANCE hInst, int cmdShow, HWND& outHwnd) {
 
-	    hInst_ = hInst;
+	hInst_ = hInst;
 
 	// 1) Window
 	const wchar_t* kClass = L"DX12AppClass";
@@ -95,6 +95,15 @@ bool WindowDX::Initialize(HINSTANCE hInst, int cmdShow, HWND& outHwnd) {
 		return false;
 	ShowWindow(hwnd_, cmdShow);
 	outHwnd = hwnd_;
+
+#if _DEBUG
+	{
+		ComPtr<ID3D12Debug> dbg;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) {
+			dbg->EnableDebugLayer();
+		}
+	}
+#endif
 
 	// 2) Device/Queue/Allocator/List
 #ifdef _DEBUG

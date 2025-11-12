@@ -1,16 +1,17 @@
 #pragma once
 // =======================================
-//  Renderer : OBJ / Sprite / Sphere / Grid描画
-//  ※シェーダは埋め込み文字列で同梱
-//  ※ブレンドモード切替対応（Sprite）
+//  Renderer : OBJ / Sprite / Sphere / Grid / Voxel / Laser
+//  ※シェーダは埋め込み文字列で同梱（cpp）
 // =======================================
 #include "Camera.h"
 #include "Matrix4x4.h"
 #include "Model.h"
 #include "Transform.h"
 #include "WindowDX.h"
+
 #include <DirectXMath.h>
 #include <d3d12.h>
+#include <memory>
 #include <string>
 #include <vector>
 #include <wrl.h>
@@ -19,11 +20,12 @@ namespace Engine {
 
 class Renderer {
 public:
-	// ★ 統一（cpp側の独自定数は廃止）
-	static constexpr size_t kCBSlots = 8192; // リング総スロット数（以前4096⇔8192が混在）
-	static constexpr size_t kCBStride = 256; // 256Bアライン
+	// ---- 定数（CBは256Bアライン）----
+	static constexpr size_t kCBSlots = 8192;
+	static constexpr size_t kCBStride = 256;
+	static constexpr UINT kSRVHeapSize = 16384;
 
-	// ==== ユーザーが触る構造体（ImGui連携想定） ====
+	// ---- UI から操作する構造体 ----
 	struct SpriteTf {
 		Vector3 t{0, 0, 0}, s{1, 1, 1};
 		Vector4 c{1, 1, 1, 1};
@@ -37,75 +39,96 @@ public:
 		float rot = 0.0f; // degree
 	};
 
-	// ==== ブレンドモード列挙 ====
-	enum class BlendMode {
-		Opaque,
-		Alpha,
-		Add,
-		Subtract,
-		Multiply,
-	};
+	// ---- ブレンドモード ----
+	enum class BlendMode { Opaque, Alpha, Add, Subtract, Multiply };
 
 public:
+	// 初期化/終了
 	bool Initialize(WindowDX& dx);
 	void Shutdown();
 
+	// 共通CB更新 & デモ描画（OBJ, Sphere, Sprite）
 	void UpdateCB(const Camera& cam, const SpriteTf& spr, const SphereTf& sph, const UVParam& uv, const Vector3& lightDir);
-
-	// useBallTex == true のとき球に sample.png を貼る（デモ用）
 	void Record(WindowDX& dx, bool useBallTex);
 
-	// ==== ブレンドモード操作 ====
+	// ブレンドモード
 	void SetBlendMode(BlendMode m) { blendMode_ = m; }
 	BlendMode GetBlendMode() const { return blendMode_; }
 
-	// ==== モデル管理 ====
+	// モデル（外部Modelクラス）
 	int LoadModel(ID3D12Device* device, ID3D12GraphicsCommandList* cmd, const std::string& filepath);
-	// 追記
 	void UpdateModelCBWithColor(int handle, const Camera& cam, const Transform& tf, const Vector4& mulColor);
-
 	void DrawModel(int handle, ID3D12GraphicsCommandList* cmd);
 
-	// ==== ★フレーム境界ラッパー ====
+	// フレーム境界（必要なときだけ使用）
 	void BeginFrame(ID3D12GraphicsCommandList* cmd);
 	void EndFrame(ID3D12GraphicsCommandList* cmd);
 
-	// ====  内部リソースアクセス ====
+	// 便利アクセス
 	ID3D12Device* GetDevice(WindowDX& dx) { return dx.Dev(); }
 	ID3D12GraphicsCommandList* GetCommandList(WindowDX& dx) { return dx.List(); }
 
-	void UpdateModelCBWithColorAt(int handle, size_t slot, const Engine::Camera& cam, const Engine::Transform& tf, const Engine::Vector4& mulColor);
-
+	// モデル：多スロットCB
+	void UpdateModelCBWithColorAt(int handle, size_t slot, const Camera& cam, const Transform& tf, const Vector4& mulColor);
 	void DrawModelAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot);
 
-	// ==== ★グリッド（Unityのシーンビュー風） ====
-	// half: 片側の線本数 / cell: マス目サイズ / y: 設置高さ
+	// Grid（Unity風シーングリッド）
 	bool InitGrid(WindowDX& dx, int half = 30, float cell = 1.0f, float y = 0.0f, float phaseX = 0.0f, float phaseZ = 0.0f);
-
 	void DrawGrid(const Camera& cam, ID3D12GraphicsCommandList* cmd, Vector4 mainColor = {0.15f, 0.15f, 0.15f, 1}, Vector4 axisColor = {0.30f, 0.30f, 0.30f, 1}, int majorStep = 5);
 
-	// 共通
+	// ネオン枠（モデル用）PSO
+	bool InitNeonFramePSO(ID3D12Device* device, ID3D12RootSignature* rs);
+	void DrawModelNeonFrame(int handle, ID3D12GraphicsCommandList* cmd);
+	void DrawModelNeonFrameAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot);
+
+	// レーザー専用PSO
+	bool InitLaserPSO(ID3D12Device* device, ID3D12RootSignature* rs);
+
+	// 情報
+	size_t MaxModelCBSlots() const; // = kCBSlots
+	size_t CBStride() const;        // = kCBStride
+
+	// ==== Voxel（Compute生成 → Draw）====
+	bool InitVoxelCS(ID3D12Device* dev);
+	bool InitVoxelDrawPSO(ID3D12Device* dev);
+	bool CreateVoxelBuffers(ID3D12Device* dev, UINT maxVertices);
+	void DispatchVoxel(ID3D12GraphicsCommandList* cmd, UINT gridX, UINT gridZ);
+	UINT ReadbackVoxelVertexCount();
+	void DrawVoxel(ID3D12GraphicsCommandList* cmd, const Camera& cam);
+
+	// ==== モデルまとめ ====
 	struct Vertex {
-		DirectX::XMFLOAT4 pos;    // (x,y,z,w) ※w=1
-		DirectX::XMFLOAT2 uv;     // (u,v)
-		DirectX::XMFLOAT3 normal; // 使わなくても確保
+		DirectX::XMFLOAT4 pos;
+		DirectX::XMFLOAT2 uv;
+		DirectX::XMFLOAT3 normal;
 	};
-
 	struct CBCommon {
-		DirectX::XMFLOAT4X4 mvp; // ← XMMATRIX ではなく XMFLOAT4X4 に
-		DirectX::XMFLOAT4 col;   // ← 色は col に一本化（mulColor は廃止）
+		DirectX::XMFLOAT4X4 mvp;
+		DirectX::XMFLOAT4 col;
 	};
-	static_assert(sizeof(CBCommon) <= kCBStride, "CBCommon too large for CB stride");
-
-	struct CBSpriteUV {
-		DirectX::XMFLOAT4X4 uvMat;
-	};
-
 	struct CBLight {
 		DirectX::XMFLOAT4 dir;
 	};
 
-	// OBJ
+	struct ModelEntry {
+		std::unique_ptr<Model> model;
+		Microsoft::WRL::ComPtr<ID3D12Resource> cb;
+		D3D12_GPU_DESCRIPTOR_HANDLE srvGpu{};
+		Transform transform;
+		uint8_t* cbMapped = nullptr;
+	};
+
+private:
+	// ---- 内部ユーティリティ（cppで実装）----
+	static std::vector<Vertex> LoadObj(const std::string& dir, const std::string& name);
+	static Microsoft::WRL::ComPtr<ID3DBlob> Compile(const char* src, const char* entry, const char* target);
+
+	bool InitModel(WindowDX& dx);
+	bool InitSprite(WindowDX& dx);
+	bool InitSphere(WindowDX& dx);
+
+public: // （外からも参照することが多いので public に）
+	// OBJ（デモ）
 	struct Modeler {
 		std::vector<Vertex> v;
 		Microsoft::WRL::ComPtr<ID3D12Resource> vb, cb, tex, up;
@@ -115,23 +138,19 @@ public:
 		int srvIndex = 0;
 	} mdl_;
 
-	// Sprite
+	// Sprite（各種ブレンド）
 	struct Sprite {
 		Microsoft::WRL::ComPtr<ID3D12Resource> vb, ib, cb, cbUv;
 		D3D12_VERTEX_BUFFER_VIEW vbv{};
 		D3D12_INDEX_BUFFER_VIEW ibv{};
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> rs;
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-		Microsoft::WRL::ComPtr<ID3D12PipelineState> psoAlpha;
-		Microsoft::WRL::ComPtr<ID3D12PipelineState> psoAdd;
-		Microsoft::WRL::ComPtr<ID3D12PipelineState> psoSub;
-		Microsoft::WRL::ComPtr<ID3D12PipelineState> psoMul;
+		Microsoft::WRL::ComPtr<ID3D12PipelineState> psoAlpha, psoAdd, psoSub, psoMul;
 		Microsoft::WRL::ComPtr<ID3D12Resource> tex0, up0, tex1, up1;
-		int srvIndex0 = 1;
-		int srvIndex1 = 2;
+		int srvIndex0 = 1, srvIndex1 = 2;
 	} spr_;
 
-	// Sphere
+	// Sphere（簡易ライティング）
 	struct Sphere {
 		Microsoft::WRL::ComPtr<ID3D12Resource> vb, ib, cb, cbLight;
 		D3D12_VERTEX_BUFFER_VIEW vbv{};
@@ -140,52 +159,42 @@ public:
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
 	} sph_;
 
-	// ==== ★Grid（ライン描画用） ====
+	// Grid
 	struct VTXL {
 		Vector3 pos;
 	};
 	struct Grid {
-		Microsoft::WRL::ComPtr<ID3D12Resource> vb; // 全ライン頂点
+		Microsoft::WRL::ComPtr<ID3D12Resource> vb;
 		D3D12_VERTEX_BUFFER_VIEW vbv{};
 		UINT vcount = 0;
-		Microsoft::WRL::ComPtr<ID3D12Resource> cb; // mvp+color
+		Microsoft::WRL::ComPtr<ID3D12Resource> cb;
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> rs;
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
 		float y = 0.0f;
 		int half = 30;
 		float cell = 1.0f;
-		float phaseX = 0.0f;
-		float phaseZ = 0.0f;
-		UINT zCount = 0; // 生成した縦線の本数
-		UINT xCount = 0; // 生成した横線の本数
+		float phaseX = 0.0f, phaseZ = 0.0f;
+		UINT zCount = 0, xCount = 0;
 	} grid_;
 
-	// 複数モデル管理
-	struct ModelEntry {
-		std::unique_ptr<Model> model;
-		Microsoft::WRL::ComPtr<ID3D12Resource> cb; // 定数バッファ
-		D3D12_GPU_DESCRIPTOR_HANDLE srvGpu{};
-		Transform transform;
-		uint8_t* cbMapped = nullptr;
-	};
+	// 複数モデル
 	std::vector<ModelEntry> models_;
 
-	// 共通リソース
+	// 共通（SRVヒープ / ルート / PSO）
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvHeap_;
 	UINT descriptorSize_ = 0;
 	int nextSrvIndex_ = 3;
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> rs_;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> pso_;
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoNeonFrame_;
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoLaser_;
 
-	// 内部ユーティリティ
-	bool InitModel(WindowDX& dx);
-	bool InitSprite(WindowDX& dx);
-	bool InitSphere(WindowDX& dx);
-	static std::vector<Vertex> LoadObj(const std::string& dir, const std::string& name);
-	static Microsoft::WRL::ComPtr<ID3DBlob> Compile(const char* src, const char* entry, const char* target);
+	// 実行時設定
+	WindowDX* dx_ = nullptr;
+	BlendMode blendMode_ = BlendMode::Opaque;
 
-	// 一時
+	// デモ用状態
 	SpriteTf sprTf_{};
 	SphereTf sphTf_{
 	    {0, 0, 5}
@@ -193,31 +202,52 @@ public:
 	UVParam uv_{};
 	Vector3 lightDir_{0, 1, -1};
 
-	// 描画対象DX
-	WindowDX* dx_ = nullptr;
+	// ==== Voxel（Compute）====
+	struct VoxelGPU {
+		// 頂点出力（UAV & VB 兼用）
+		Microsoft::WRL::ComPtr<ID3D12Resource> vbUav;
+		D3D12_VERTEX_BUFFER_VIEW vbv{};
+		UINT maxVertices = 0;
 
-	// 現在のブレンドモード
-	BlendMode blendMode_ = BlendMode::Opaque;
+		// 頂点数カウンタ
+		Microsoft::WRL::ComPtr<ID3D12Resource> counterUav; // RAW R32
+		int counterSrvIndex = -1;
 
-	// ---- モデル情報へのアクセス ----
-	ModelEntry& GetModel(int handle) { return models_[handle]; }
-	const ModelEntry& GetModel(int handle) const { return models_[handle]; }
+		Microsoft::WRL::ComPtr<ID3D12Resource> counterReadback;
+		void* counterCpuPtr = nullptr;
 
-	// ==== レーザー専用PSO ====
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoLaser_;
-	bool InitLaserPSO(ID3D12Device* device, ID3D12RootSignature* rs);
+		// SRV/UAVテーブル用の先頭インデックス
+		int vbUavIndex = -1;
+		int dummySrvIndex = -1;
 
-	size_t MaxModelCBSlots() const; // 例: 1024
-	size_t CBStride() const;        // 例: 256（CBは256Bアライン）
+		// CS
+		Microsoft::WRL::ComPtr<ID3D12RootSignature> rsCS;
+		Microsoft::WRL::ComPtr<ID3D12PipelineState> psoCS;
 
-	// ネオン枠（モデル用）を作るPSO
-	bool InitNeonFramePSO(ID3D12Device* device, ID3D12RootSignature* rs);
-	void DrawModelNeonFrame(int handle, ID3D12GraphicsCommandList* cmd);
+		// Draw
+		Microsoft::WRL::ComPtr<ID3D12RootSignature> rsVoxelDraw;
+		Microsoft::WRL::ComPtr<ID3D12PipelineState> psoVoxelDraw;
 
-	void DrawModelNeonFrameAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot);
+		// CB
+		Microsoft::WRL::ComPtr<ID3D12Resource> cbCS;
+		Microsoft::WRL::ComPtr<ID3D12Resource> cbDraw;
 
-private:
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoNeonFrame_;
+		// （将来のトライプラナ用）テクスチャ
+		Microsoft::WRL::ComPtr<ID3D12Resource> tex[3], texUp[3];
+		UINT texBaseIndex = UINT_MAX; // t0..t2
+
+		struct CBCS {
+			DirectX::XMUINT2 grid; // (nx, nz)
+			float cell;
+			float amp;
+			float freq;
+			UINT maxVerts;
+			float pad[3];
+		} params{};
+	} voxel_;
+
+	// 4B の 0 を置いたアップロード（UAVカウンタ初期化に使う）
+	Microsoft::WRL::ComPtr<ID3D12Resource> zeroUpload_;
 };
 
 } // namespace Engine

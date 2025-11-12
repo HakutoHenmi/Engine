@@ -285,26 +285,23 @@ void GameScene::Update() {
 }
 
 void GameScene::Draw() {
-	// ===== コマンドリスト取得（WindowDXがBegin済み想定） =====
 	ID3D12GraphicsCommandList* cmd = dx_->List();
 
-	// Renderer BeginFrame（状態セットのみ）
+	// ① フレーム開始
 	renderer_.BeginFrame(cmd);
 
-	// グリッド
+	// ★★ ② ここで Compute → そのまま描画 ★★
+	renderer_.DispatchVoxel(cmd, /*gridX=*/256, /*gridZ=*/256);
+	renderer_.DrawVoxel(cmd, *activeCam_);
+
+	// ③ 既存の描画
 	if (gridVisible_) {
 		renderer_.DrawGrid(*activeCam_, cmd);
 	}
-
-	// ステージ
 	stage_.Draw(renderer_, cmd);
-
-	// プレイヤー
 	player_.Draw(renderer_, *activeCam_, cmd);
-
 	sparks_.Draw(cmd, *activeCam_);
 
-	// Renderer EndFrame（Closeしない）
 	renderer_.EndFrame(cmd);
 }
 

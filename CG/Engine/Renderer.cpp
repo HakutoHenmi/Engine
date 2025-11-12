@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <wrl/client.h>
 
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "DirectXTex.lib")
@@ -193,10 +194,30 @@ std::vector<Renderer::Vertex> Renderer::LoadObj(const std::string& dir, const st
 	return out;
 }
 
+// Renderer.cpp 追記：UAV対応バッファ作成
+static Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBufferUAV(ID3D12Device* dev, UINT64 bytes) {
+	using Microsoft::WRL::ComPtr;
+	ComPtr<ID3D12Resource> res;
+	auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+	auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+	HR_CHECK(dev->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&res)));
+	return res;
+}
+
+static Microsoft::WRL::ComPtr<ID3D12Resource> CreateUploadBuffer(ID3D12Device* dev, UINT64 bytes) {
+	using Microsoft::WRL::ComPtr;
+	ComPtr<ID3D12Resource> res;
+	auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes);
+	auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	HR_CHECK(dev->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&res)));
+	return res;
+}
+
 bool Renderer::Initialize(WindowDX& dx) {
+	dx_ = &dx;
 	// SRVヒープ作成
 	D3D12_DESCRIPTOR_HEAP_DESC hd{};
-	hd.NumDescriptors = 128;
+	hd.NumDescriptors = kSRVHeapSize;
 	hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	dx.Dev()->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&srvHeap_));
@@ -246,7 +267,377 @@ bool Renderer::Initialize(WindowDX& dx) {
 	InitLaserPSO(dx.Dev(), rs_.Get());
 	InitNeonFramePSO(dx.Dev(), rs_.Get());
 
+	// ==== ここからVoxel初期化 ====
+	InitVoxelCS(dx.Dev());
+	InitVoxelDrawPSO(dx.Dev());
+	voxel_.cbDraw = CreateUploadBuffer(dx.Dev(), 256);
+	// 例: 最大100万頂点（高さ地形なら 512x512 セル → 6頂点/セル = 約1.6M → 適宜調整）
+	CreateVoxelBuffers(dx.Dev(), 600000);
+
+	zeroUpload_ = CreateUploadBuffer(dx.Dev(), 4);
+	void* zp = nullptr;
+	zeroUpload_->Map(0, nullptr, &zp);
+	*reinterpret_cast<UINT*>(zp) = 0;
+	zeroUpload_->Unmap(0, nullptr);
+
+	{
+		auto desc = CD3DX12_RESOURCE_DESC::Buffer(4);
+		auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+		HR_CHECK(dx.Dev()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&voxel_.counterReadback)));
+		voxel_.counterReadback->Map(0, nullptr, &voxel_.counterCpuPtr);
+	}
+
 	return true;
+}
+
+bool Renderer::InitVoxelCS(ID3D12Device* dev) {
+	// ---- RootSignature (CS) ----
+	// b0: CB, [u0,u1]: UAV をテーブルで束ねる（連番2個）
+	CD3DX12_DESCRIPTOR_RANGE rngUAV;
+	rngUAV.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0); // u0..u1
+	CD3DX12_ROOT_PARAMETER rp[2];
+	rp[0].InitAsConstantBufferView(0);       // b0
+	rp[1].InitAsDescriptorTable(1, &rngUAV); // UAVテーブル
+	CD3DX12_ROOT_SIGNATURE_DESC rsd;
+	rsd.Init(_countof(rp), rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+	Microsoft::WRL::ComPtr<ID3DBlob> sig, err;
+	HR_CHECK(D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+	HR_CHECK(dev->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(), IID_PPV_ARGS(&voxel_.rsCS)));
+
+	// ---- Compute Shader（頂点ごと法線）----
+	auto cs = Compile(
+	    R"(
+struct VOut {
+    float3 pos;
+    float2 uv;
+    float3 nrm;
+};
+
+cbuffer CBCS : register(b0) {
+    uint2 grid;   // (nx, nz)
+    float cell;   // セルサイズ
+    float amp;    // 振幅
+    float freq;   // 周波数
+    uint  maxVerts;
+};
+
+RWStructuredBuffer<VOut> OutVerts : register(u0);
+RWByteAddressBuffer      Counter  : register(u1);
+
+// 簡易高さ関数
+float h(float2 xz) {
+    return amp * (sin(xz.x*freq) * 0.5 + cos(xz.y*freq) * 0.5);
+}
+
+// 1セル=2三角形=6頂点生成（グリッド地形）
+[numthreads(8, 8, 1)]
+void main(uint3 dtid : SV_DispatchThreadID) {
+    uint x = dtid.x;
+    uint z = dtid.y;
+    if (x >= grid.x || z >= grid.y) return;
+
+    // 中心配置（原点センタリング）
+    float x0 = (x    ) * cell - 0.5 * grid.x * cell;
+    float x1 = (x + 1) * cell - 0.5 * grid.x * cell;
+    float z0 = (z    ) * cell - 0.5 * grid.y * cell;
+    float z1 = (z + 1) * cell - 0.5 * grid.y * cell;
+
+    float y00 = h(float2(x0, z0));
+    float y10 = h(float2(x1, z0));
+    float y01 = h(float2(x0, z1));
+    float y11 = h(float2(x1, z1));
+
+    // 頂点配列
+    VOut v[6];
+    // tri0: (x0,z0)-(x1,z0)-(x0,z1)
+    v[0].pos = float3(x0, y00, z0); v[0].uv = float2(0,0);
+    v[1].pos = float3(x1, y10, z0); v[1].uv = float2(1,0);
+    v[2].pos = float3(x0, y01, z1); v[2].uv = float2(0,1);
+    // tri1: (x1,z0)-(x1,z1)-(x0,z1)
+    v[3].pos = float3(x1, y10, z0); v[3].uv = float2(1,0);
+    v[4].pos = float3(x1, y11, z1); v[4].uv = float2(1,1);
+    v[5].pos = float3(x0, y01, z1); v[5].uv = float2(0,1);
+
+    // ★頂点ごとに勾配からスムーズ法線（中心差分）
+    float eps = cell;
+
+    float hx00 = h(float2(x0+eps, z0)) - h(float2(x0-eps, z0));
+    float hz00 = h(float2(x0, z0+eps)) - h(float2(x0, z0-eps));
+    float3 n00 = normalize(float3(-hx00, 2*eps, -hz00));
+
+    float hx10 = h(float2(x1+eps, z0)) - h(float2(x1-eps, z0));
+    float hz10 = h(float2(x1, z0+eps)) - h(float2(x1, z0-eps));
+    float3 n10 = normalize(float3(-hx10, 2*eps, -hz10));
+
+    float hx01 = h(float2(x0+eps, z1)) - h(float2(x0-eps, z1));
+    float hz01 = h(float2(x0, z1+eps)) - h(float2(x0, z1-eps));
+    float3 n01 = normalize(float3(-hx01, 2*eps, -hz01));
+
+    float hx11 = h(float2(x1+eps, z1)) - h(float2(x1-eps, z1));
+    float hz11 = h(float2(x1, z1+eps)) - h(float2(x1, z1-eps));
+    float3 n11 = normalize(float3(-hx11, 2*eps, -hz11));
+
+    // tri0
+    v[0].nrm = n00;
+    v[1].nrm = n10;
+    v[2].nrm = n01;
+    // tri1
+    v[3].nrm = n10;
+    v[4].nrm = n11;
+    v[5].nrm = n01;
+
+    // カウンタを6加算してベース取得
+    uint vertBase;
+    Counter.InterlockedAdd(0, 6, vertBase);
+    if (vertBase + 6 > maxVerts) return;
+
+    // 書き込み
+    [unroll] for (int i = 0; i < 6; i++) {
+        OutVerts[vertBase + i] = v[i];
+    }
+}
+)",
+	    "main", "cs_5_0");
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC pd{};
+	pd.pRootSignature = voxel_.rsCS.Get();
+	pd.CS = {cs->GetBufferPointer(), cs->GetBufferSize()};
+	HR_CHECK(dev->CreateComputePipelineState(&pd, IID_PPV_ARGS(&voxel_.psoCS)));
+
+	// CS用CB
+	voxel_.cbCS.Reset();
+	voxel_.cbCS = CreateUploadBuffer(dev, 256);
+
+	return true;
+}
+
+bool Renderer::InitVoxelDrawPSO(ID3D12Device* dev) {
+	// VS: POSITION(float3), TEXCOORD(float2), NORMAL(float3)
+	auto vs = Compile(
+	    R"(
+        cbuffer C0:register(b0){ float4x4 mvp; float4 col; }
+        struct VSIn  { float3 pos:POSITION; float2 uv:TEXCOORD; float3 nrm:NORMAL; };
+        struct VSOut { float4 sp:SV_Position; float2 uv:TEXCOORD; float3 n:NORMAL; };
+        VSOut main(VSIn i){
+            VSOut o;
+            o.sp = mul(float4(i.pos,1), mvp);
+            o.uv = i.uv;
+            o.n = i.nrm;
+            return o;
+        }
+    )",
+	    "main", "vs_5_0");
+
+	auto ps = Compile(
+	    R"(
+        cbuffer C0:register(b0){ float4x4 mvp; float4 col; }
+        float4 main(float4 sp:SV_Position, float2 uv:TEXCOORD, float3 n:NORMAL):SV_Target{
+            float ndl = saturate(dot(normalize(n), normalize(float3(-0.3,1,-0.5))));
+            float3 base = lerp(float3(0.2,0.7,0.4), float3(0.8,1,0.9), uv.y);
+            return float4(base * (0.35+0.65*ndl) * col.rgb, 1);
+        }
+    )",
+	    "main", "ps_5_0");
+
+	// RootSig（既存の mdl_ と同じ：b0のみ）
+	CD3DX12_ROOT_PARAMETER rp[1];
+	rp[0].InitAsConstantBufferView(0); // b0
+
+	CD3DX12_ROOT_SIGNATURE_DESC rsd;
+	rsd.Init(_countof(rp), rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	Microsoft::WRL::ComPtr<ID3DBlob> sig, err;
+	HR_CHECK(D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+	HR_CHECK(dev->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(), IID_PPV_ARGS(&voxel_.rsVoxelDraw)));
+
+	D3D12_INPUT_ELEMENT_DESC il[] = {
+	    {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+	    {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+	    {"NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
+	d.pRootSignature = voxel_.rsVoxelDraw.Get();
+	d.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+	d.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+	d.InputLayout = {il, _countof(il)};
+	d.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	d.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	d.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	d.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	d.SampleMask = UINT_MAX;
+	d.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	d.NumRenderTargets = 1;
+	d.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	d.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+	d.SampleDesc.Count = 1;
+	HR_CHECK(dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&voxel_.psoVoxelDraw)));
+	return true;
+}
+
+bool Renderer::CreateVoxelBuffers(ID3D12Device* dev, UINT maxVertices) {
+	voxel_.maxVertices = maxVertices;
+
+	// 頂点(構造化)バッファ（UAV & VB 兼用）
+	const UINT stride = sizeof(float) * 3 + sizeof(float) * 2 + sizeof(float) * 3; // 3+2+3=8 float = 32byte
+	const UINT64 bytes = UINT64(stride) * maxVertices;
+	voxel_.vbUav = CreateDefaultBufferUAV(dev, bytes);
+
+	// UAV割り当て（共有SRVヒープにUAVも作れる）
+	voxel_.vbUavIndex = nextSrvIndex_++; // 空きスロット
+	D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
+	uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+	uav.Buffer.NumElements = maxVertices;
+	uav.Buffer.StructureByteStride = stride;
+	uav.Format = DXGI_FORMAT_UNKNOWN; // 構造化
+	dev->CreateUnorderedAccessView(voxel_.vbUav.Get(), nullptr, &uav, dx_->SRV_CPU(voxel_.vbUavIndex));
+
+	// 頂点数カウンタ（RWByteAddressBuffer相当だが簡易にR32_UINT UAVで扱う）
+	{
+		// Counter用に32bit uint 1要素のUAVバッファ
+		auto desc = CD3DX12_RESOURCE_DESC::Buffer(4, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+		HR_CHECK(dev->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&voxel_.counterUav)));
+
+		voxel_.counterSrvIndex = nextSrvIndex_++;
+		D3D12_UNORDERED_ACCESS_VIEW_DESC cuav{};
+		cuav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+		cuav.Buffer.NumElements = 1; // 4B = 1要素として扱う
+		cuav.Buffer.StructureByteStride = 0;
+		cuav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW; // ★RAWが必須
+		cuav.Format = DXGI_FORMAT_R32_TYPELESS;        // ★ByteAddress は typeless + RAW
+		dev->CreateUnorderedAccessView(voxel_.counterUav.Get(), nullptr, &cuav, dx_->SRV_CPU(voxel_.counterSrvIndex));
+	}
+
+	// VBV（描画時に使う）
+	voxel_.vbv = {voxel_.vbUav->GetGPUVirtualAddress(), (UINT)bytes, stride};
+	return true;
+}
+
+void Renderer::DispatchVoxel(ID3D12GraphicsCommandList* cmd, UINT gridX, UINT gridZ) {
+
+	const UINT need = gridX * gridZ * 6;
+	if (need > voxel_.maxVertices) {
+		OutputDebugStringA("DispatchVoxel: exceeded maxVertices. skip\n");
+		return;
+	}
+
+	// ① UNORDERED_ACCESS → COPY_DEST
+	auto toCopy = CD3DX12_RESOURCE_BARRIER::Transition(voxel_.counterUav.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_DEST);
+	cmd->ResourceBarrier(1, &toCopy);
+
+	// ② 4バイトコピー
+	cmd->CopyBufferRegion(
+	    voxel_.counterUav.Get(), 0, // dest
+	    zeroUpload_.Get(), 0,       // src
+	    4);
+
+	// ③ COPY_DEST → UNORDERED_ACCESS
+	auto toUav = CD3DX12_RESOURCE_BARRIER::Transition(voxel_.counterUav.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	cmd->ResourceBarrier(1, &toUav);
+
+	// CSパラメータ
+	voxel_.params.grid = {gridX, gridZ};
+	voxel_.params.cell = 1.0f;
+	voxel_.params.amp = 1.0f;
+	voxel_.params.freq = 0.10f;
+	voxel_.params.maxVerts = voxel_.maxVertices;
+
+	void* p = nullptr;
+	const D3D12_RANGE readRange{0, 0};
+	if (!voxel_.cbCS)
+		voxel_.cbCS = CreateUploadBuffer(dx_->Dev(), 256);
+	if (SUCCEEDED(voxel_.cbCS->Map(0, &readRange, &p)) && p) {
+		memcpy(p, &voxel_.params, sizeof(voxel_.params));
+		voxel_.cbCS->Unmap(0, nullptr);
+
+	} else {
+		OutputDebugStringA("DispatchVoxel: cbCS->Map failed\n");
+		return; // このフレームは安全にスキップ
+	}
+
+	// リソース遷移：VB(UAV)を UAV 状態に
+	{
+		auto b = CD3DX12_RESOURCE_BARRIER::Transition(voxel_.vbUav.Get(), D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		cmd->ResourceBarrier(1, &b);
+	}
+
+	// CS 実行
+	cmd->SetPipelineState(voxel_.psoCS.Get());
+	cmd->SetComputeRootSignature(voxel_.rsCS.Get());
+	cmd->SetComputeRootConstantBufferView(0, voxel_.cbCS->GetGPUVirtualAddress());
+	// UAVは “連番2個” のディスクリプタテーブルとして渡す
+	// 先頭は vbUav、次が counterUav（CreateVoxelBuffers で連番確保済み）
+	cmd->SetComputeRootDescriptorTable(1, dx_->SRV_GPU(voxel_.vbUavIndex));
+
+	const UINT tgx = (gridX + 7) / 8;
+	const UINT tgz = (gridZ + 7) / 8;
+	cmd->Dispatch(tgx, tgz, 1);
+
+	{
+		D3D12_RESOURCE_BARRIER uavs[] = {
+		    CD3DX12_RESOURCE_BARRIER::UAV(voxel_.vbUav.Get()),
+		    CD3DX12_RESOURCE_BARRIER::UAV(voxel_.counterUav.Get()),
+		};
+		cmd->ResourceBarrier(_countof(uavs), uavs);
+	}
+
+	const UINT needed = gridX * gridZ * 6;
+	if (needed > voxel_.maxVertices) {
+		// 例: グリッドを縮小 or return
+		// （まずはreturnで落ちなくする）
+		return;
+	}
+
+	// UAV→VB 用に状態戻し
+	{
+		auto b = CD3DX12_RESOURCE_BARRIER::Transition(voxel_.vbUav.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_GENERIC_READ);
+		cmd->ResourceBarrier(1, &b);
+	}
+
+	{
+		// UNORDERED_ACCESS → COPY_SOURCE
+		auto toSrc = CD3DX12_RESOURCE_BARRIER::Transition(voxel_.counterUav.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		cmd->ResourceBarrier(1, &toSrc);
+
+		// 4B コピー（READBACK側は常に COPY_DEST）
+		cmd->CopyResource(voxel_.counterReadback.Get(), voxel_.counterUav.Get());
+
+		// COPY_SOURCE → UNORDERED_ACCESS
+		auto backUav = CD3DX12_RESOURCE_BARRIER::Transition(voxel_.counterUav.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		cmd->ResourceBarrier(1, &backUav);
+	}
+}
+
+UINT Renderer::ReadbackVoxelVertexCount() { return voxel_.counterCpuPtr ? *reinterpret_cast<const UINT*>(voxel_.counterCpuPtr) : 0u; }
+
+void Renderer::DrawVoxel(ID3D12GraphicsCommandList* cmd, const Camera& cam) {
+	// 頂点数
+	const UINT vertCount = ReadbackVoxelVertexCount();
+	if (vertCount == 0)
+		return;
+
+	// C0(mvp,col)
+	CBCommon cb{};
+	cb.col = DirectX::XMFLOAT4(1, 1, 1, 1);
+	auto vp = cam.View() * cam.Proj();
+	DirectX::XMStoreFloat4x4(&cb.mvp, DirectX::XMMatrixTranspose(vp));
+	// 使い回し用に mdl_.cb をCBに流用してもOK。ここでは簡易に mdl_.cb を利用：
+	void* map = nullptr;
+	if (FAILED(voxel_.cbDraw->Map(0, nullptr, &map)) || !map) {
+		// まれに初期フレームで来た場合はスキップ
+		return;
+	}
+	memcpy(map, &cb, sizeof(cb));
+	voxel_.cbDraw->Unmap(0, nullptr);
+
+	cmd->SetPipelineState(voxel_.psoVoxelDraw.Get());
+	cmd->SetGraphicsRootSignature(voxel_.rsVoxelDraw.Get());
+	cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	cmd->IASetVertexBuffers(0, 1, &voxel_.vbv);
+	cmd->SetGraphicsRootConstantBufferView(0, voxel_.cbDraw->GetGPUVirtualAddress());
+	cmd->DrawInstanced(vertCount, 1, 0, 0);
 }
 
 void Renderer::Shutdown() {
@@ -277,6 +668,18 @@ void Renderer::Shutdown() {
 	spr_.up1.Reset();
 	spr_.srvIndex0 = 1;
 	spr_.srvIndex1 = 2;
+
+	// ▼Voxel 関連
+	voxel_.vbUav.Reset();
+	voxel_.counterUav.Reset();
+	voxel_.cbCS.Reset();
+	voxel_.cbDraw.Reset();
+	voxel_.rsCS.Reset();
+	voxel_.psoCS.Reset();
+	voxel_.rsVoxelDraw.Reset();
+	voxel_.psoVoxelDraw.Reset();
+	voxel_.vbv = {};
+	voxel_.maxVertices = 0;
 
 	// ---- 球体 ----
 	sph_.vb.Reset();
