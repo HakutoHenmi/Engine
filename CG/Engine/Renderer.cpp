@@ -327,7 +327,15 @@ RWByteAddressBuffer      Counter  : register(u1);
 
 // 簡易高さ関数
 float h(float2 xz) {
-    return amp * (sin(xz.x*freq) * 0.5 + cos(xz.y*freq) * 0.5);
+    // 低周波～高周波を重ねた fBm 風
+    float f = freq;
+    float a = amp;
+
+    float v = 0.0;
+    v += a * 0.60 * (sin(xz.x * (f*1.00) + 0.9) + cos(xz.y * (f*1.02) + 1.7)) * 0.5;
+    v += a * 0.25 * (sin(xz.x * (f*2.05) + 3.2) + cos(xz.y * (f*1.98) + 2.4)) * 0.5;
+    v += a * 0.15 * (sin(xz.x * (f*3.95) + 5.4) + cos(xz.y * (f*4.10) + 4.1)) * 0.5;
+    return v;
 }
 
 // 1セル=2三角形=6頂点生成（グリッド地形）
@@ -413,44 +421,114 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 }
 
 bool Renderer::InitVoxelDrawPSO(ID3D12Device* dev) {
-	// VS: POSITION(float3), TEXCOORD(float2), NORMAL(float3)
-	auto vs = Compile(
-	    R"(
-        cbuffer C0:register(b0){ float4x4 mvp; float4 col; }
-        struct VSIn  { float3 pos:POSITION; float2 uv:TEXCOORD; float3 nrm:NORMAL; };
-        struct VSOut { float4 sp:SV_Position; float2 uv:TEXCOORD; float3 n:NORMAL; };
-        VSOut main(VSIn i){
-            VSOut o;
-            o.sp = mul(float4(i.pos,1), mvp);
-            o.uv = i.uv;
-            o.n = i.nrm;
-            return o;
-        }
-    )",
-	    "main", "vs_5_0");
+	// === テクスチャ読み込み ===
+	std::wstring base = Asset(L"Resources/Terrain/");
+	const wchar_t* names[3] = {L"dirt.png", L"grass.png", L"rock.png"};
+	voxel_.texBaseIndex = nextSrvIndex_;
 
-	auto ps = Compile(
-	    R"(
-        cbuffer C0:register(b0){ float4x4 mvp; float4 col; }
-        float4 main(float4 sp:SV_Position, float2 uv:TEXCOORD, float3 n:NORMAL):SV_Target{
-            float ndl = saturate(dot(normalize(n), normalize(float3(-0.3,1,-0.5))));
-            float3 base = lerp(float3(0.2,0.7,0.4), float3(0.8,1,0.9), uv.y);
-            return float4(base * (0.35+0.65*ndl) * col.rgb, 1);
-        }
-    )",
-	    "main", "ps_5_0");
+	for (int i = 0; i < 3; i++) {
+		DirectX::ScratchImage img;
+		LoadFromWICFile((base + names[i]).c_str(), WIC_FLAGS_FORCE_SRGB, nullptr, img);
+		const auto& m = img.GetMetadata();
 
-	// RootSig（既存の mdl_ と同じ：b0のみ）
-	CD3DX12_ROOT_PARAMETER rp[1];
-	rp[0].InitAsConstantBufferView(0); // b0
+		CD3DX12_HEAP_PROPERTIES hpU(D3D12_HEAP_TYPE_UPLOAD);
+		CD3DX12_HEAP_PROPERTIES hpD(D3D12_HEAP_TYPE_DEFAULT);
+		auto rdTex = CD3DX12_RESOURCE_DESC::Tex2D(m.format, m.width, (UINT)m.height);
+		HR_CHECK(dev->CreateCommittedResource(&hpD, D3D12_HEAP_FLAG_NONE, &rdTex, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&voxel_.tex[i])));
 
+		UINT64 upSize = GetRequiredIntermediateSize(voxel_.tex[i].Get(), 0, 1);
+		auto rdUp = CD3DX12_RESOURCE_DESC::Buffer(upSize);
+		HR_CHECK(dev->CreateCommittedResource(&hpU, D3D12_HEAP_FLAG_NONE, &rdUp, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&voxel_.texUp[i])));
+
+		D3D12_SUBRESOURCE_DATA sd{img.GetImages()->pixels, (LONG_PTR)img.GetImages()->rowPitch, (LONG_PTR)img.GetImages()->slicePitch};
+		auto* cmd = dx_->List();
+		UpdateSubresources(cmd, voxel_.tex[i].Get(), voxel_.texUp[i].Get(), 0, 0, 1, &sd);
+		auto bar = CD3DX12_RESOURCE_BARRIER::Transition(voxel_.tex[i].Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		cmd->ResourceBarrier(1, &bar);
+
+		// SRV 登録
+		D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
+		sv.Format = m.format;
+		sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		sv.Texture2D.MipLevels = 1;
+		dev->CreateShaderResourceView(voxel_.tex[i].Get(), &sv, dx_->SRV_CPU(nextSrvIndex_++));
+	}
+
+	// === RootSig ===
+	CD3DX12_DESCRIPTOR_RANGE rng;
+	rng.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 3, 0); // t0,t1,t2
+	CD3DX12_ROOT_PARAMETER rp[2];
+	rp[0].InitAsConstantBufferView(0);
+	rp[1].InitAsDescriptorTable(1, &rng, D3D12_SHADER_VISIBILITY_PIXEL);
+	CD3DX12_STATIC_SAMPLER_DESC smp(0);
 	CD3DX12_ROOT_SIGNATURE_DESC rsd;
-	rsd.Init(_countof(rp), rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+	rsd.Init(2, rp, 1, &smp, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 	Microsoft::WRL::ComPtr<ID3DBlob> sig, err;
 	HR_CHECK(D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
 	HR_CHECK(dev->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(), IID_PPV_ARGS(&voxel_.rsVoxelDraw)));
 
+	// === シェーダ ===
+	auto vs = Compile(
+	    R"(
+        cbuffer C0:register(b0){ float4x4 mvp; float4 col; }
+        struct VSIn  { float3 pos:POSITION; float2 uv:TEXCOORD; float3 nrm:NORMAL; };
+        struct VSOut { float4 sp:SV_Position; float3 wpos:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD; };
+        VSOut main(VSIn i){
+            VSOut o;
+            o.sp = mul(float4(i.pos,1), mvp);
+            o.wpos = i.pos;
+            o.n = i.nrm;
+            o.uv = i.uv;
+            return o;
+        })",
+	    "main", "vs_5_0");
+
+	auto ps = Compile(
+	    R"(
+       cbuffer C0:register(b0){ float4x4 mvp; float4 col; }
+Texture2D dirtTex:register(t0);
+Texture2D grassTex:register(t1);
+Texture2D rockTex:register(t2);
+SamplerState S:register(s0);
+
+float4 main(float4 sp:SV_Position, float3 wpos:POSITION, float3 n:NORMAL, float2 uv:TEXCOORD):SV_Target {
+    float h = wpos.y;
+    float t = saturate((h + 3.5) / 7.0); // -3.5～+3.5 の高さ
+
+    // --- 斜面係数（岩をもっと出す）---
+    float slope = 1.0 - saturate(abs(normalize(n).y));  // 垂直→1、水平→0
+    slope = pow(slope, 0.6);  // 少し強調
+
+    // --- サンプリング ---
+    float3 cDirt  = dirtTex.Sample(S, uv * 6.0).rgb;
+    float3 cGrass = grassTex.Sample(S, uv * 5.0).rgb;
+    float3 cRock  = rockTex.Sample(S, uv * 8.0).rgb;
+
+    // --- 土→草 ---
+    float gk = smoothstep(0.20, 0.50, t);
+    float3 base = lerp(cDirt, cGrass, gk);
+
+    // --- 草→岩（高所＋斜面で出す）---
+    float rk_h = smoothstep(0.65, 0.85, t);   // 高所の影響を早めに開始
+    float rk_s = smoothstep(0.25, 0.55, slope);
+    float rk = saturate(rk_h + rk_s - rk_h*rk_s); // OR 合成
+    rk = pow(rk, 0.8); // ブレンドを少し滑らかに
+
+    float3 mixCol = lerp(base, cRock, rk);
+
+    // --- 照明 ---
+    float3 L = normalize(float3(-0.3, 1.0, -0.5));
+    float ndl = saturate(dot(normalize(n), L));
+    float3 lit = mixCol * (0.25 + 0.75 * ndl);
+
+    return float4(lit, 1);
+}
+)",
+	    "main", "ps_5_0");
+
+	// === PSO ===
 	D3D12_INPUT_ELEMENT_DESC il[] = {
 	    {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
 	    {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -473,6 +551,7 @@ bool Renderer::InitVoxelDrawPSO(ID3D12Device* dev) {
 	d.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	d.SampleDesc.Count = 1;
 	HR_CHECK(dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&voxel_.psoVoxelDraw)));
+
 	return true;
 }
 
@@ -539,9 +618,9 @@ void Renderer::DispatchVoxel(ID3D12GraphicsCommandList* cmd, UINT gridX, UINT gr
 
 	// CSパラメータ
 	voxel_.params.grid = {gridX, gridZ};
-	voxel_.params.cell = 1.0f;
-	voxel_.params.amp = 1.0f;
-	voxel_.params.freq = 0.10f;
+	voxel_.params.cell = 0.80f; // セルを少し粗くして起伏を見せる
+	voxel_.params.amp = 3.50f;  // 高さの振幅を拡大（±3.5m 目安）
+	voxel_.params.freq = 0.08f; // うねりの大きさ（低めで大地感）
 	voxel_.params.maxVerts = voxel_.maxVertices;
 
 	void* p = nullptr;
@@ -613,22 +692,17 @@ void Renderer::DispatchVoxel(ID3D12GraphicsCommandList* cmd, UINT gridX, UINT gr
 UINT Renderer::ReadbackVoxelVertexCount() { return voxel_.counterCpuPtr ? *reinterpret_cast<const UINT*>(voxel_.counterCpuPtr) : 0u; }
 
 void Renderer::DrawVoxel(ID3D12GraphicsCommandList* cmd, const Camera& cam) {
-	// 頂点数
 	const UINT vertCount = ReadbackVoxelVertexCount();
 	if (vertCount == 0)
 		return;
 
-	// C0(mvp,col)
 	CBCommon cb{};
 	cb.col = DirectX::XMFLOAT4(1, 1, 1, 1);
 	auto vp = cam.View() * cam.Proj();
 	DirectX::XMStoreFloat4x4(&cb.mvp, DirectX::XMMatrixTranspose(vp));
-	// 使い回し用に mdl_.cb をCBに流用してもOK。ここでは簡易に mdl_.cb を利用：
+
 	void* map = nullptr;
-	if (FAILED(voxel_.cbDraw->Map(0, nullptr, &map)) || !map) {
-		// まれに初期フレームで来た場合はスキップ
-		return;
-	}
+	voxel_.cbDraw->Map(0, nullptr, &map);
 	memcpy(map, &cb, sizeof(cb));
 	voxel_.cbDraw->Unmap(0, nullptr);
 
@@ -637,6 +711,11 @@ void Renderer::DrawVoxel(ID3D12GraphicsCommandList* cmd, const Camera& cam) {
 	cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	cmd->IASetVertexBuffers(0, 1, &voxel_.vbv);
 	cmd->SetGraphicsRootConstantBufferView(0, voxel_.cbDraw->GetGPUVirtualAddress());
+
+	// ★ テクスチャバインド
+	if (voxel_.texBaseIndex != UINT_MAX)
+		cmd->SetGraphicsRootDescriptorTable(1, dx_->SRV_GPU(voxel_.texBaseIndex));
+
 	cmd->DrawInstanced(vertCount, 1, 0, 0);
 }
 
