@@ -287,14 +287,14 @@ void GameScene::Update() {
 void GameScene::Draw() {
 	ID3D12GraphicsCommandList* cmd = dx_->List();
 
-	// ① フレーム開始
+	// フレーム開始
 	renderer_.BeginFrame(cmd);
 
-	// ★★ ② ここで Compute → そのまま描画 ★★
+	// ここで Compute
 	renderer_.DispatchVoxel(cmd, /*gridX=*/256, /*gridZ=*/256);
 	renderer_.DrawVoxel(cmd, *activeCam_);
 
-	// ③ 既存の描画
+	// 既存の描画
 	if (gridVisible_) {
 		renderer_.DrawGrid(*activeCam_, cmd);
 	}
