@@ -325,17 +325,43 @@ cbuffer CBCS : register(b0) {
 RWStructuredBuffer<VOut> OutVerts : register(u0);
 RWByteAddressBuffer      Counter  : register(u1);
 
-// 簡易高さ関数
-float h(float2 xz) {
-    // 低周波～高周波を重ねた fBm 風
-    float f = freq;
-    float a = amp;
+// ボス用：とても広いドーナツ型ステージの高さ関数
+// ドーナツ型＋外側は平坦
+// ボス用：ドーナツ枠を広く＋枠は完全に平坦
+float h(float2 xz)
+{
+    float r = length(xz);      // 原点からの距離
 
-    float v = 0.0;
-    v += a * 0.60 * (sin(xz.x * (f*1.00) + 0.9) + cos(xz.y * (f*1.02) + 1.7)) * 0.5;
-    v += a * 0.25 * (sin(xz.x * (f*2.05) + 3.2) + cos(xz.y * (f*1.98) + 2.4)) * 0.5;
-    v += a * 0.15 * (sin(xz.x * (f*3.95) + 5.4) + cos(xz.y * (f*4.10) + 4.1)) * 0.5;
-    return v;
+    // 半径・高さのパラメータ（好みで調整可）
+    const float pitRadius        = 40.0;  // 真ん中の穴の半径
+    const float outerRingRadius  = 100.0;  // ドーナツ枠の外側（ここまで枠）
+    const float pitFloorY        = -4.0;  // 穴の底の高さ
+    const float ringY            =  2.5;  // ドーナツ枠の高さ（岩の高さにしたい値）
+    const float outerBaseY       = -2.0;  // さらに外側のベースの高さ
+    const float outerBlendWidth  = 10.0;  // 枠→外のなだらかな繋ぎ幅
+
+    float y;
+
+    if (r < pitRadius)
+    {
+        // ---- 真ん中の穴：中心が低く、pitRadius でちょうど ringY になるお椀形 ----
+        float t = r / pitRadius;      // 0 ～ 1
+        y = pitFloorY + (ringY - pitFloorY) * (t * t);
+    }
+    else if (r < outerRingRadius)
+    {
+        // ---- ドーナツの枠：かなり広い範囲を完全にフラット ----
+        y = ringY;
+    }
+    else
+    {
+        // ---- 枠の外：ringY から outerBaseY まで少しだけなだらかに落とす ----
+        float t = (r - outerRingRadius) / outerBlendWidth;
+        t = saturate(t);              // 0～1 にクランプ
+        y = lerp(ringY, outerBaseY, t);
+    }
+
+    return y;
 }
 
 // 1セル=2三角形=6頂点生成（グリッド地形）
@@ -1752,13 +1778,32 @@ bool Renderer::InitLaserPSO(ID3D12Device* device, ID3D12RootSignature* rs) {
 
 // CS内の h(xz) と同じ式をCPUにも再現
 static inline float VoxelHeightFunc_CPU(float x, float z, float amp, float freq) {
-	float f = freq;
-	float a = amp;
-	float v = 0.0f;
-	v += a * 0.60f * (sinf(x * (f * 1.00f) + 0.9f) + cosf(z * (f * 1.02f) + 1.7f)) * 0.5f;
-	v += a * 0.25f * (sinf(x * (f * 2.05f) + 3.2f) + cosf(z * (f * 1.98f) + 2.4f)) * 0.5f;
-	v += a * 0.15f * (sinf(x * (f * 3.95f) + 5.4f) + cosf(z * (f * 4.10f) + 4.1f)) * 0.5f;
-	return v;
+	(void)amp;
+	(void)freq;
+
+	float r = std::sqrt(x * x + z * z);
+
+	const float pitRadius = 40.0f;
+	const float outerRingRadius = 100.0f;
+	const float pitFloorY = -4.0f;
+	const float ringY = 2.5f; // 岩の高さ
+	const float outerBaseY = -2.0f;
+	const float outerBlendWidth = 10.0f;
+
+	float y;
+
+	if (r < pitRadius) {
+		float t = r / pitRadius; // 0～1
+		y = pitFloorY + (ringY - pitFloorY) * (t * t);
+	} else if (r < outerRingRadius) {
+		y = ringY; // ドーナツ枠：完全にフラット
+	} else {
+		float t = (r - outerRingRadius) / outerBlendWidth;
+		t = (std::max)(0.0f, (std::min)(1.0f, t)); // saturate 相当
+		y = ringY + (outerBaseY - ringY) * t;
+	}
+
+	return y;
 }
 
 float Renderer::TerrainHeightAt(float x, float z) const {
