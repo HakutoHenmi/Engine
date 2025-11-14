@@ -1,4 +1,5 @@
 #pragma once
+#include "Boss.h"
 #include "Camera.h"
 #include "IScene.h"
 #include "Input.h"
@@ -36,6 +37,9 @@ private:
 
 	Stage stage_;
 	Player player_;
+
+	std::unique_ptr<Game::Boss> boss_;
+	void ApplyBossHitToTerrain_(const Game::TerrainHitInfo& info); // 地形を凹ませる用
 
 	bool gridVisible_ = true;
 

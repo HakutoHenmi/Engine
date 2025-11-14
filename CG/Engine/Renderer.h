@@ -234,21 +234,41 @@ public: // （外からも参照することが多いので public に）
 
 		// （将来のトライプラナ用）テクスチャ
 		Microsoft::WRL::ComPtr<ID3D12Resource> tex[3], texUp[3];
-		UINT texBaseIndex = UINT_MAX; // t0..t2
+		UINT texBaseIndex = UINT_MAX; // t0.t2
 
+		// ---- 凹み情報（ボス攻撃）----
+		struct Dent {
+			DirectX::XMFLOAT2 centerXZ; // 凹み中心 (x,z)
+			float radius;               // 半径
+			float depth;                // 深さ（正の値、下方向にへこませる）
+		};
+
+		static constexpr UINT kMaxDents = 32;
+
+		Dent dents[kMaxDents]{}; // 登録済み凹み
+		UINT dentCount = 0;      // 有効な凹み数
+
+		// ---- CS に渡す定数バッファ ----
 		struct CBCS {
 			DirectX::XMUINT2 grid; // (nx, nz)
 			float cell;
 			float amp;
+
 			float freq;
 			UINT maxVerts;
-			float pad[3];
+			UINT dentCount;
+			float pad; // 16B アライン用
+
+			Dent dents[kMaxDents];
 		} params{};
 	} voxel_;
 
 	// 現在のボクセル地形パラメータから、任意XZにおける高さ/法線を返す
 	float TerrainHeightAt(float x, float z) const;
 	Vector3 TerrainNormalAt(float x, float z) const;
+
+	// ボス攻撃などで「この位置をへこませたい」という情報を登録
+	void AddTerrainDent(const DirectX::XMFLOAT3& position, float radius, float depth);
 
 	// 4B の 0 を置いたアップロード（UAVカウンタ初期化に使う）
 	Microsoft::WRL::ComPtr<ID3D12Resource> zeroUpload_;
