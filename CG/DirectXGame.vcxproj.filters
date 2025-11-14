@@ -120,6 +120,9 @@
     <ClCompile Include="Game\Actors\ParticleEmitter.cpp">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClCompile>
+    <ClCompile Include="Game\Actors\Boss.cpp">
+      <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\shaders\SpritePS.hlsl">
@@ -272,6 +275,9 @@
       <Filter>ソース ファイル\Engine</Filter>
     </ClInclude>
     <ClInclude Include="Game\Actors\ParticleEmitter.h">
+      <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClInclude>
+    <ClInclude Include="Game\Actors\Boss.h">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClInclude>
   </ItemGroup>

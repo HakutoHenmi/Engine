@@ -314,51 +314,87 @@ struct VOut {
     float3 nrm;
 };
 
+struct Dent {
+    float2 centerXZ;
+    float  radius;
+    float  depth;
+};
+
+static const uint kMaxDents = 32;
+
 cbuffer CBCS : register(b0) {
     uint2 grid;   // (nx, nz)
     float cell;   // セルサイズ
-    float amp;    // 振幅
-    float freq;   // 周波数
+    float amp;    // 振幅（今回は未使用）
+    
+    float freq;   // 周波数（今回は未使用）
     uint  maxVerts;
+    uint  dentCount;
+    float _pad;   // 16B アライン用
+
+    Dent dents[kMaxDents];
 };
 
 RWStructuredBuffer<VOut> OutVerts : register(u0);
 RWByteAddressBuffer      Counter  : register(u1);
 
-// ボス用：とても広いドーナツ型ステージの高さ関数
-// ドーナツ型＋外側は平坦
-// ボス用：ドーナツ枠を広く＋枠は完全に平坦
-float h(float2 xz)
+// ---- ベースのドーナツ型ステージの高さ関数 ----
+float h_base(float2 xz)
 {
     float r = length(xz);      // 原点からの距離
 
-    // 半径・高さのパラメータ（好みで調整可）
-    const float pitRadius        = 40.0;  // 真ん中の穴の半径
-    const float outerRingRadius  = 100.0;  // ドーナツ枠の外側（ここまで枠）
-    const float pitFloorY        = -4.0;  // 穴の底の高さ
-    const float ringY            =  2.5;  // ドーナツ枠の高さ（岩の高さにしたい値）
-    const float outerBaseY       = -2.0;  // さらに外側のベースの高さ
-    const float outerBlendWidth  = 10.0;  // 枠→外のなだらかな繋ぎ幅
+    const float pitRadius        = 40.0;   // 真ん中の穴の半径
+    const float outerRingRadius  = 100.0;  // ドーナツ枠の外側
+    const float pitFloorY        = -4.0;   // 穴の底の高さ
+    const float ringY            =  2.5;   // ドーナツ枠の高さ
+    const float outerBaseY       = -2.0;   // 外側の高さ
+    const float outerBlendWidth  = 10.0;   // 枠→外のなだらかな繋ぎ幅
 
     float y;
 
     if (r < pitRadius)
     {
-        // ---- 真ん中の穴：中心が低く、pitRadius でちょうど ringY になるお椀形 ----
         float t = r / pitRadius;      // 0 ～ 1
         y = pitFloorY + (ringY - pitFloorY) * (t * t);
     }
     else if (r < outerRingRadius)
     {
-        // ---- ドーナツの枠：かなり広い範囲を完全にフラット ----
-        y = ringY;
+        y = ringY;                    // 枠はフラット
     }
     else
     {
-        // ---- 枠の外：ringY から outerBaseY まで少しだけなだらかに落とす ----
         float t = (r - outerRingRadius) / outerBlendWidth;
-        t = saturate(t);              // 0～1 にクランプ
+        t = saturate(t);
         y = lerp(ringY, outerBaseY, t);
+    }
+
+    return y;
+}
+
+// ---- 凹み込みの高さ関数 ----
+float h(float2 xz)
+{
+    float y = h_base(xz);
+
+    // すべての凹みを適用
+    [loop]
+    for (uint i = 0; i < dentCount; ++i)
+    {
+        Dent d = dents[i];
+
+        float2 dXZ = xz - d.centerXZ;
+        float  dist2 = dot(dXZ, dXZ);
+        float  r2    = d.radius * d.radius;
+
+        if (dist2 > r2) continue;
+
+        // 中心ほど大きくへこむ（0～1）
+        float t = 1.0 - dist2 / r2;
+
+        // 必要なら pow(t,2) とかで形を調整可能
+        float dentY = -d.depth * t;
+
+        y += dentY;
     }
 
     return y;
@@ -366,7 +402,8 @@ float h(float2 xz)
 
 // 1セル=2三角形=6頂点生成（グリッド地形）
 [numthreads(8, 8, 1)]
-void main(uint3 dtid : SV_DispatchThreadID) {
+void main(uint3 dtid : SV_DispatchThreadID)
+{
     uint x = dtid.x;
     uint z = dtid.y;
     if (x >= grid.x || z >= grid.y) return;
@@ -382,18 +419,27 @@ void main(uint3 dtid : SV_DispatchThreadID) {
     float y01 = h(float2(x0, z1));
     float y11 = h(float2(x1, z1));
 
-    // 頂点配列
     VOut v[6];
-    // tri0: (x0,z0)-(x1,z0)-(x0,z1)
-    v[0].pos = float3(x0, y00, z0); v[0].uv = float2(0,0);
-    v[1].pos = float3(x1, y10, z0); v[1].uv = float2(1,0);
-    v[2].pos = float3(x0, y01, z1); v[2].uv = float2(0,1);
-    // tri1: (x1,z0)-(x1,z1)-(x0,z1)
-    v[3].pos = float3(x1, y10, z0); v[3].uv = float2(1,0);
-    v[4].pos = float3(x1, y11, z1); v[4].uv = float2(1,1);
-    v[5].pos = float3(x0, y01, z1); v[5].uv = float2(0,1);
 
-    // ★頂点ごとに勾配からスムーズ法線（中心差分）
+    // tri0 (x0,z0)-(x1,z0)-(x0,z1)
+    v[0].pos = float3(x0, y00, z0);
+    v[1].pos = float3(x1, y10, z0);
+    v[2].pos = float3(x0, y01, z1);
+
+    // tri1 (x1,z0)-(x1,z1)-(x0,z1)
+    v[3].pos = float3(x1, y10, z0);
+    v[4].pos = float3(x1, y11, z1);
+    v[5].pos = float3(x0, y01, z1);
+
+    // UV（とりあえず平面投影）
+    v[0].uv = float2(0, 0);
+    v[1].uv = float2(1, 0);
+    v[2].uv = float2(0, 1);
+    v[3].uv = float2(1, 0);
+    v[4].uv = float2(1, 1);
+    v[5].uv = float2(0, 1);
+
+    // 法線（高さ関数から数値微分）
     float eps = cell;
 
     float hx00 = h(float2(x0+eps, z0)) - h(float2(x0-eps, z0));
@@ -441,7 +487,7 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
 	// CS用CB
 	voxel_.cbCS.Reset();
-	voxel_.cbCS = CreateUploadBuffer(dev, 256);
+	voxel_.cbCS = CreateUploadBuffer(dev, sizeof(voxel_.params));
 
 	return true;
 }
@@ -645,14 +691,23 @@ void Renderer::DispatchVoxel(ID3D12GraphicsCommandList* cmd, UINT gridX, UINT gr
 	// CSパラメータ
 	voxel_.params.grid = {gridX, gridZ};
 	voxel_.params.cell = 0.80f; // セルを少し粗くして起伏を見せる
-	voxel_.params.amp = 3.50f;  // 高さの振幅を拡大（±3.5m 目安）
-	voxel_.params.freq = 0.08f; // うねりの大きさ（低めで大地感）
+	voxel_.params.amp = 3.50f;  // （今は未使用だが残しておく）
+	voxel_.params.freq = 0.08f; // （同上）
 	voxel_.params.maxVerts = voxel_.maxVertices;
+
+	// ★ 凹み情報を CB にコピー
+	voxel_.params.dentCount = voxel_.dentCount;
+	if (voxel_.params.dentCount > VoxelGPU::kMaxDents) {
+		voxel_.params.dentCount = VoxelGPU::kMaxDents;
+	}
+	for (UINT i = 0; i < voxel_.params.dentCount; ++i) {
+		voxel_.params.dents[i] = voxel_.dents[i];
+	}
 
 	void* p = nullptr;
 	const D3D12_RANGE readRange{0, 0};
 	if (!voxel_.cbCS)
-		voxel_.cbCS = CreateUploadBuffer(dx_->Dev(), 256);
+		voxel_.cbCS = CreateUploadBuffer(dx_->Dev(), sizeof(voxel_.params));
 	if (SUCCEEDED(voxel_.cbCS->Map(0, &readRange, &p)) && p) {
 		memcpy(p, &voxel_.params, sizeof(voxel_.params));
 		voxel_.cbCS->Unmap(0, nullptr);
@@ -1806,10 +1861,43 @@ static inline float VoxelHeightFunc_CPU(float x, float z, float amp, float freq)
 	return y;
 }
 
+void Renderer::AddTerrainDent(const DirectX::XMFLOAT3& position, float radius, float depth) {
+	auto& vox = voxel_;
+	if (vox.dentCount >= VoxelGPU::kMaxDents) {
+		// いっぱいになったら、とりあえずこれ以上追加しない（必要なら上書きロジックにする）
+		OutputDebugStringA("AddTerrainDent: kMaxDents reached, skipping.\n");
+		return;
+	}
+
+	auto& d = vox.dents[vox.dentCount++];
+	d.centerXZ = DirectX::XMFLOAT2(position.x, position.z);
+	d.radius = radius;
+	d.depth = depth;
+}
+
 float Renderer::TerrainHeightAt(float x, float z) const {
 	const float amp = voxel_.params.amp;
 	const float freq = voxel_.params.freq;
-	return VoxelHeightFunc_CPU(x, z, amp, freq);
+
+	// ベースの地形高さ
+	float y = VoxelHeightFunc_CPU(x, z, amp, freq);
+
+	// 凹みを適用（CS の h() と同じロジック）
+	for (UINT i = 0; i < voxel_.dentCount; ++i) {
+		const auto& d = voxel_.dents[i];
+		float dx = x - d.centerXZ.x;
+		float dz = z - d.centerXZ.y;
+		float dist2 = dx * dx + dz * dz;
+		float r2 = d.radius * d.radius;
+		if (dist2 > r2)
+			continue;
+
+		float t = 1.0f - dist2 / r2;
+		float dentY = -d.depth * t;
+		y += dentY;
+	}
+
+	return y;
 }
 
 Vector3 Renderer::TerrainNormalAt(float x, float z) const {
@@ -1818,7 +1906,25 @@ Vector3 Renderer::TerrainNormalAt(float x, float z) const {
 	const float freq = voxel_.params.freq;
 	const float eps = cell;
 
-	auto h = [&](float X, float Z) { return VoxelHeightFunc_CPU(X, Z, amp, freq); };
+	auto h = [&](float X, float Z) {
+		float y = VoxelHeightFunc_CPU(X, Z, amp, freq);
+
+		for (UINT i = 0; i < voxel_.dentCount; ++i) {
+			const auto& d = voxel_.dents[i];
+			float dx = X - d.centerXZ.x;
+			float dz = Z - d.centerXZ.y;
+			float dist2 = dx * dx + dz * dz;
+			float r2 = d.radius * d.radius;
+			if (dist2 > r2)
+				continue;
+
+			float t = 1.0f - dist2 / r2;
+			float dentY = -d.depth * t;
+			y += dentY;
+		}
+
+		return y;
+	};
 
 	float hx = h(x + eps, z) - h(x - eps, z);
 	float hz = h(x, z + eps) - h(x, z - eps);

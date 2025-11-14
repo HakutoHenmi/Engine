@@ -349,3 +349,6 @@ FodyWeavers.xsd
 # ==== Custom additions ====
 # Ignore ImGui configuration
 imgui.ini
+
+# Crash dump
+*.dmp

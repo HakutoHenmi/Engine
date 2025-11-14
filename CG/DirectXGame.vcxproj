@@ -191,6 +191,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClCompile Include="externals\imgui\imgui_impl_win32.cpp" />
     <ClCompile Include="externals\imgui\imgui_tables.cpp" />
     <ClCompile Include="externals\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="Game\Actors\Boss.cpp" />
     <ClCompile Include="Game\Actors\Collision.cpp" />
     <ClCompile Include="Game\Actors\Enemy.cpp" />
     <ClCompile Include="Game\Actors\EnemyBullet.cpp" />
@@ -329,6 +330,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClInclude Include="externals\imgui\imstb_textedit.h" />
     <ClInclude Include="externals\imgui\imstb_truetype.h" />
     <ClInclude Include="Game\Actors\AABB.h" />
+    <ClInclude Include="Game\Actors\Boss.h" />
     <ClInclude Include="Game\Actors\Collision.h" />
     <ClInclude Include="Game\Actors\Enemy.h" />
     <ClInclude Include="Game\Actors\EnemyBullet.h" />

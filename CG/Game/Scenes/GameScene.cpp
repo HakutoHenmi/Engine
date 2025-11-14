@@ -65,6 +65,28 @@ void GameScene::Initialize(WindowDX* dx) {
 	// ===============================
 	stage_.Initialize(renderer_, *dx_, *activeCam_, "Resources/Maps/Stage1_Map.csv", "Resources/Maps/Stage1_Angle.csv", 1.0f, 1.0f, 1.0f, GridAnchor::Center, ModelOrigin::Center, 0.02f, 0.02f);
 
+	// --- ボス生成 ---
+	boss_ = std::make_unique<Game::Boss>();
+	boss_->Initialize(renderer_, *dx_);
+
+	// ★ボスのルート位置（ステージ中央など）
+	Engine::Vector3 bossRoot{0.0f, 0.0f, 0.0f};
+
+	// ★この XZ でのボクセル地形の高さ(Y)を取得
+	float groundY = renderer_.TerrainHeightAt(bossRoot.x, bossRoot.z);
+
+	// 必要なら +0.1f とかで少し浮かせてもOK
+	bossRoot.y = groundY; // または groundY + 0.1f;
+
+	// ルート位置（支点）を設定
+	boss_->SetPosition(bossRoot);
+
+	// 地形を凹ませるコールバック
+	boss_->SetTerrainHitCallback([this](const Game::TerrainHitInfo& info) { ApplyBossHitToTerrain_(info); });
+
+	// ★XZ 位置からボクセル地形の高さを返すコールバック
+	boss_->SetTerrainHeightCallback([this](const Engine::Vector3& pos) { return renderer_.TerrainHeightAt(pos.x, pos.z); });
+
 	// ===============================
 	// 5. Grid 初期化
 	// ===============================
@@ -104,6 +126,13 @@ void GameScene::Update() {
 	Vector3 prevPos = player_.GetPos(); // 移動前
 	player_.Update(*activeCam_, input_);
 	Vector3 newPos = player_.GetPos(); // 移動後
+
+	// --- ボス更新（プレイヤー位置を渡す）---
+	Engine::Vector3 playerPos = player_.GetPos();
+	float dt = 1.0f / 60.0f; // 今は固定フレームと同じ
+	if (boss_) {
+		boss_->Update(dt, playerPos);
+	}
 
 	// === 壁との当たり判定（半径あり：Collide & Slide） ===
 	const auto& walls = stage_.GetWallsDynamic();
@@ -211,7 +240,7 @@ void GameScene::Update() {
 		camPitch_ = std::clamp(camPitch_, -1.2f, 1.2f);
 
 		// --- 追従対象座標 ---
-		const Vector3 playerPos = player_.GetPos();
+		// const Vector3 playerPos = player_.GetPos();
 
 		// 目標カメラ位置（オービット）
 		const float cx = playerPos.x - std::cos(camYaw_) * std::cos(camPitch_) * camDist_;
@@ -284,6 +313,16 @@ void GameScene::Update() {
 	sparks_.Update(1.0f / 60.0f);
 }
 
+void GameScene::ApplyBossHitToTerrain_(const Game::TerrainHitInfo& info) {
+	char buf[256];
+	std::snprintf(buf, sizeof(buf), "[BossHit] pos=(%.2f, %.2f, %.2f), r=%.2f, depth=%.2f\n", info.position.x, info.position.y, info.position.z, info.radius, info.depth);
+	OutputDebugStringA(buf);
+
+	// ★ボスの着弾位置を GPU ボクセル地形に凹みとして登録
+	DirectX::XMFLOAT3 pos{info.position.x, info.position.y, info.position.z};
+	renderer_.AddTerrainDent(pos, info.radius, info.depth);
+}
+
 void GameScene::Draw() {
 	ID3D12GraphicsCommandList* cmd = dx_->List();
 
@@ -301,6 +340,10 @@ void GameScene::Draw() {
 	stage_.Draw(renderer_, cmd);
 	player_.Draw(renderer_, *activeCam_, cmd);
 	sparks_.Draw(cmd, *activeCam_);
+
+	if (boss_) {
+		boss_->Draw(renderer_, dx_->List(), *activeCam_);
+	}
 
 	renderer_.EndFrame(cmd);
 }
