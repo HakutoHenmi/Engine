@@ -9,11 +9,28 @@ bool ImGuiLayer::Initialize(HWND hwnd, WindowDX& dx) {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
-	// ImGuiのフォントSRVはSRVヒープの最後（index=3）を使用
-	auto cpu = dx.SRV_CPU(dx.FontSrvIndex());
-	auto gpu = dx.SRV_GPU(dx.FontSrvIndex());
+
+	// === ImGui 専用の SRV ヒープを作る（フォント用） ===
+	D3D12_DESCRIPTOR_HEAP_DESC desc{};
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	desc.NumDescriptors = 1; // フォントテクスチャ用に1個だけ
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	desc.NodeMask = 0;
+	if (FAILED(dx.Dev()->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&imguiHeap_)))) {
+		return false;
+	}
+
+	auto cpu = imguiHeap_->GetCPUDescriptorHandleForHeapStart();
+	auto gpu = imguiHeap_->GetGPUDescriptorHandleForHeapStart();
+
 	ImGui_ImplWin32_Init(hwnd);
-	ImGui_ImplDX12_Init(dx.Dev(), 2, DXGI_FORMAT_R8G8B8A8_UNORM, dx.SRV(), cpu, gpu);
+	ImGui_ImplDX12_Init(
+	    dx.Dev(),
+	    2, // フレーム数（バックバッファ数）
+	    DXGI_FORMAT_R8G8B8A8_UNORM,
+	    imguiHeap_, // ★ ImGui専用ヒープ
+	    cpu, gpu);
+
 	return true;
 }
 
@@ -32,6 +49,11 @@ void ImGuiLayer::Shutdown() {
 	ImGui_ImplDX12_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
+
+	if (imguiHeap_) { // ★ ヒープ解放
+		imguiHeap_->Release();
+		imguiHeap_ = nullptr;
+	}
 }
 
 } // namespace Engine

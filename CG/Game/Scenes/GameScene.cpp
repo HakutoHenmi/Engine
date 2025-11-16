@@ -1,5 +1,6 @@
 #include "GameScene.h"
 #include "Collision.h"
+#include "imgui.h"
 #include <Windows.h>
 #include <Xinput.h>
 #pragma comment(lib, "xinput9_1_0.lib")
@@ -103,10 +104,26 @@ void GameScene::Initialize(WindowDX* dx) {
 	camPos_ = DirectX::XMFLOAT3{0.0f, 10.0f, -20.0f};
 	camPlay_.SetPosition(camPos_);
 	firstMouse_ = true;
+
+	// ==== FPS 計測初期化 ====
+	fpsLastTime_ = std::chrono::steady_clock::now();
+	fpsFrameCount_ = 0;
+	fps_ = 0.0f;
 }
 
 void GameScene::Update() {
 	input_.Update();
+
+	// ==== FPS 計測 ====
+	fpsFrameCount_++;
+	auto now = std::chrono::steady_clock::now();
+	float sec = std::chrono::duration<float>(now - fpsLastTime_).count();
+	// 0.5秒ごとくらいに更新（チラつき防止）
+	if (sec >= 0.5f) {
+		fps_ = fpsFrameCount_ / sec;
+		fpsFrameCount_ = 0;
+		fpsLastTime_ = now;
+	}
 
 	// === F1：カメラ切替 ===
 	bool nowF1 = (GetAsyncKeyState(VK_F1) & 0x8000) != 0;
@@ -344,6 +361,31 @@ void GameScene::Draw() {
 	if (boss_) {
 		boss_->Draw(renderer_, dx_->List(), *activeCam_);
 	}
+
+	// ==== ImGui FPS カウンター ====
+	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always); // 画面左上固定
+	ImGui::SetNextWindowBgAlpha(0.35f);                        // 半透明背景
+
+	// 文字やパディングを少し大きくする
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
+	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));        // 白文字
+	ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0.6f)); // 濃い背景
+
+	ImGuiWindowFlags flags =
+	    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
+
+	ImGui::Begin("FPSOverlay", nullptr, flags);
+
+	// このウィンドウ内だけフォントを少し拡大
+	ImGui::SetWindowFontScale(1.4f);
+	ImGui::Text("FPS : %5.1f", fps_);
+	ImGui::SetWindowFontScale(1.0f);
+
+	ImGui::End();
+
+	ImGui::PopStyleColor(2);
+	ImGui::PopStyleVar();
+	// ==============================
 
 	renderer_.EndFrame(cmd);
 }

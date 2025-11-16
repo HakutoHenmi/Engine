@@ -23,11 +23,14 @@ struct TerrainHitInfo {
 
 class Boss {
 public:
+	// ボスの状態
 	enum class State {
-		Idle,    // 立っている
-		Windup,  // 溜め
-		Falling, // 倒れている
-		Recover  // 元に戻る
+		Waiting, // 次の攻撃までの待機
+		Aim,     // プレイヤー方向を狙っている
+		Charge,  // 溜め（後ろに反る）
+		Slam,    // 叩きつけ
+		Stuck,   // 地面に刺さって少し止まる
+		Recover  // 元の位置に戻る
 	};
 
 	Boss() = default;
@@ -57,23 +60,32 @@ public:
 	void SetTerrainHeightCallback(std::function<float(const Engine::Vector3&)> cb) { terrainHeightCallback_ = std::move(cb); }
 
 private:
-	void StartAttack_(const Engine::Vector3& playerPos);
-	void UpdateIdle_(float dt, const Engine::Vector3& playerPos);
-	void UpdateWindup_(float dt);
-	void UpdateFalling_(float dt);
+	// 状態更新
+	void UpdateWaiting_(float dt, const Engine::Vector3& playerPos);
+	void UpdateAim_(float dt, const Engine::Vector3& playerPos);
+	void UpdateCharge_(float dt);
+	void UpdateSlam_(float dt);
+	void UpdateStuck_(float dt);
 	void UpdateRecover_(float dt);
 
-	// 現在の傾き(currentAngle_)と根元(rootPos_)にもとづいて
-	// Transform の平行移動/回転を更新（棒の根元が常に rootPos_ に来るようにする）
+	// 状態遷移ヘルパー
+	void BeginAim_(const Engine::Vector3& playerPos);
+	void BeginCharge_();
+	void BeginSlam_();
+	void BeginStuck_();
+	void BeginRecover_();
+
+	// Transform 更新
 	void UpdateTransformFromPose_();
 
 	// 現在の傾きから「棒の先端」のワールド座標を計算
 	Engine::Vector3 GetTipPosition_() const;
 
+	// 地形への「ここを凹ませて」通知
 	void NotifyTerrainHit_();
 
 private:
-	int modelHandle_ = -1; // cube.obj
+	int modelHandle_ = -1; // 棒モデル（bou.obj）
 	Engine::Transform tf_{};
 
 	// 棒の全長
@@ -82,22 +94,37 @@ private:
 	// 根元（回転の支点）のワールド座標
 	Engine::Vector3 rootPos_{0.0f, 0.0f, 0.0f};
 
-	State state_ = State::Idle;
+	// 状態管理
+	State state_ = State::Waiting;
 	float stateTimer_ = 0.0f;
 
-	float idleTime_ = 2.0f;
-	float windupTime_ = 0.6f;
-	float fallingTime_ = 1.0f;
-	float recoverTime_ = 0.7f;
+	// 各フェーズの時間
+	float waitTime_ = 1.5f;    // 攻撃間隔
+	float aimTime_ = 1.0f;     // 狙う時間（テレグラフ）
+	float chargeTime_ = 0.5f;  // 溜め
+	float slamTime_ = 0.25f;   // 叩きつけ（速く）
+	float stuckTime_ = 0.3f;   // 刺さったまま止まる
+	float recoverTime_ = 0.6f; // 戻り
 
 	// 傾き角度（0 = 真上、正の方向に fallAxis_ 側へ倒れていく）
 	float currentAngle_ = 0.0f; // ラジアン
 	float maxAngle_ = 1.6f;     // 最大でここまで倒す（約 90°ちょい）
 
-	// 倒れる向き（XZ平面の単位ベクトル）
+	// 倒れる向き（XZ 平面の単位ベクトル）
 	Engine::Vector3 fallAxis_{1.0f, 0.0f, 0.0f};
 
+	// Aim での補間用
+	Engine::Vector3 aimStartAxis_{1.0f, 0.0f, 0.0f};
+	Engine::Vector3 aimTargetAxis_{1.0f, 0.0f, 0.0f};
+
+	// Recover で使う開始角度 / Stuck での固定角
+	float recoverStartAngle_ = 0.0f;
+	float stuckAngle_ = 0.0f;
+
+	// 地形ヒット通知フラグ
 	bool terrainHitNotified_ = false;
+
+	// コールバック
 	std::function<void(const TerrainHitInfo&)> terrainHitCallback_;
 	std::function<float(const Engine::Vector3&)> terrainHeightCallback_;
 };

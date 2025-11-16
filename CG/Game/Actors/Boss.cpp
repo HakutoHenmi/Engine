@@ -32,7 +32,7 @@ static void NormalizeXZ(Vector3& v) {
 // 初期化
 //-------------------------------------------
 void Boss::Initialize(Engine::Renderer& renderer, Engine::WindowDX& dx) {
-	// Resources/cube/cube.obj を棒として使う
+	// Resources/Boss/bou.obj を棒として使う
 	modelHandle_ = renderer.LoadModel(dx.Dev(), dx.List(), "Resources/Boss/bou.obj");
 
 	stickLength_ = 25.0f; // 好きな長さ
@@ -46,10 +46,14 @@ void Boss::Initialize(Engine::Renderer& renderer, Engine::WindowDX& dx) {
 	currentAngle_ = 0.0f;
 	maxAngle_ = PI * 0.5f + PI * 0.1f; // 90°ちょい
 
-	fallAxis_ = MakeVec3(1.0f, 0.0f, 0.0f); // 初期値。攻撃ごとにプレイヤー方向に更新する
+	fallAxis_ = MakeVec3(1.0f, 0.0f, 0.0f);
+	aimStartAxis_ = fallAxis_;
+	aimTargetAxis_ = fallAxis_;
 
-	state_ = State::Idle;
+	state_ = State::Waiting;
 	stateTimer_ = 0.0f;
+
+	terrainHitNotified_ = false;
 
 	UpdateTransformFromPose_();
 }
@@ -61,14 +65,20 @@ void Boss::Update(float dt, const Vector3& playerPos) {
 	stateTimer_ += dt;
 
 	switch (state_) {
-	case State::Idle:
-		UpdateIdle_(dt, playerPos);
+	case State::Waiting:
+		UpdateWaiting_(dt, playerPos);
 		break;
-	case State::Windup:
-		UpdateWindup_(dt);
+	case State::Aim:
+		UpdateAim_(dt, playerPos);
 		break;
-	case State::Falling:
-		UpdateFalling_(dt);
+	case State::Charge:
+		UpdateCharge_(dt);
+		break;
+	case State::Slam:
+		UpdateSlam_(dt);
+		break;
+	case State::Stuck:
+		UpdateStuck_(dt);
 		break;
 	case State::Recover:
 		UpdateRecover_(dt);
@@ -77,7 +87,7 @@ void Boss::Update(float dt, const Vector3& playerPos) {
 		break;
 	}
 
-	// 角度が変わったら Transform を更新
+	// 角度や向きが変わったら Transform を更新
 	UpdateTransformFromPose_();
 }
 
@@ -88,68 +98,139 @@ void Boss::Draw(Engine::Renderer& renderer, ID3D12GraphicsCommandList* cmd, cons
 	if (modelHandle_ < 0)
 		return;
 
-	renderer.UpdateModelCBWithColor(modelHandle_, cam, tf_, Vector4{1, 1, 1, 1});
+	// 状態によって色を変えて「攻撃っぽさ」を出す
+	Vector4 col{1, 1, 1, 1};
+	switch (state_) {
+	case State::Waiting:
+		col = Vector4{0.8f, 0.8f, 0.8f, 1.0f};
+		break;
+	case State::Aim:
+		col = Vector4{1.0f, 1.0f, 0.3f, 1.0f}; // 黄色（狙い中）
+		break;
+	case State::Charge:
+		col = Vector4{1.0f, 0.6f, 0.2f, 1.0f}; // オレンジ（溜め）
+		break;
+	case State::Slam:
+		col = Vector4{1.0f, 0.25f, 0.2f, 1.0f}; // 赤（攻撃中）
+		break;
+	case State::Stuck:
+		col = Vector4{0.9f, 0.1f, 0.1f, 1.0f}; // 濃い赤（刺さり）
+		break;
+	case State::Recover:
+		col = Vector4{0.7f, 0.7f, 1.0f, 1.0f}; // 青寄り（戻り）
+		break;
+	}
+
+	renderer.UpdateModelCBWithColor(modelHandle_, cam, tf_, col);
 	renderer.DrawModel(modelHandle_, cmd);
 }
 
 //-------------------------------------------
-// Idle → 一定時間ごとに攻撃開始
+// Waiting → 一定時間ごとに Aim へ
 //-------------------------------------------
-void Boss::UpdateIdle_(float /*dt*/, const Vector3& playerPos) {
-	if (stateTimer_ >= idleTime_) {
-		StartAttack_(playerPos);
+void Boss::UpdateWaiting_(float /*dt*/, const Vector3& playerPos) {
+	// ちょっとだけプルプルさせて「生きてる」感じに
+	currentAngle_ = 0.02f * std::sin(stateTimer_ * 2.0f);
+
+	if (stateTimer_ >= waitTime_) {
+		BeginAim_(playerPos);
 	}
 }
 
 //-------------------------------------------
-// 攻撃開始：プレイヤー方向を計算
+// Aim 開始：プレイヤー方向を狙い始める
 //-------------------------------------------
-void Boss::StartAttack_(const Vector3& playerPos) {
-	state_ = State::Windup;
+void Boss::BeginAim_(const Vector3& playerPos) {
+	state_ = State::Aim;
 	stateTimer_ = 0.0f;
-	terrainHitNotified_ = false;
+
+	aimStartAxis_ = fallAxis_;
 
 	// プレイヤー方向（XZ）
 	Vector3 toPlayer{playerPos.x - rootPos_.x, 0.0f, playerPos.z - rootPos_.z};
 	NormalizeXZ(toPlayer);
 
-	// ★ここを反転させる：プレイヤー側に倒れるようにする
-	fallAxis_.x = -toPlayer.x;
-	fallAxis_.y = 0.0f;
-	fallAxis_.z = -toPlayer.z;
+	// ★符号を反転させない
+	aimTargetAxis_.x = toPlayer.x;
+	aimTargetAxis_.y = 0.0f;
+	aimTargetAxis_.z = toPlayer.z;
 
-	currentAngle_ = 0.0f; // 真上からスタート
+	terrainHitNotified_ = false;
 }
 
 //-------------------------------------------
-// 溜め：少し後ろに反る
+// Aim：方向補間＆ガクガクするテレグラフ
 //-------------------------------------------
-void Boss::UpdateWindup_(float /*dt*/) {
-	float t = (windupTime_ > 0.0f) ? (stateTimer_ / windupTime_) : 1.0f;
+void Boss::UpdateAim_(float /*dt*/, const Vector3& /*playerPos*/) {
+	float t = (aimTime_ > 0.0f) ? (stateTimer_ / aimTime_) : 1.0f;
 	if (t > 1.0f)
 		t = 1.0f;
 
-	// ちょっとだけ反る（マイナス方向）
-	float backAngle = -PI * 0.1f;
-	currentAngle_ = backAngle * t;
+	// fallAxis_ をプレイヤー方向へ補間
+	Vector3 axis{};
+	axis.x = aimStartAxis_.x + (aimTargetAxis_.x - aimStartAxis_.x) * t;
+	axis.y = 0.0f;
+	axis.z = aimStartAxis_.z + (aimTargetAxis_.z - aimStartAxis_.z) * t;
+	fallAxis_ = axis;
+	NormalizeXZ(fallAxis_);
 
-	if (stateTimer_ >= windupTime_) {
-		state_ = State::Falling;
-		stateTimer_ = 0.0f;
-		currentAngle_ = 0.0f; // 真上から倒し始める
+	// 狙い中は小さく揺れる
+	currentAngle_ = 0.05f * std::sin(stateTimer_ * 10.0f);
+
+	if (stateTimer_ >= aimTime_) {
+		BeginCharge_();
 	}
 }
 
 //-------------------------------------------
-// 倒れ：地面に当たるまで倒す
+// Charge 開始：溜めに入る
 //-------------------------------------------
-void Boss::UpdateFalling_(float /*dt*/) {
-	float t = (fallingTime_ > 0.0f) ? (stateTimer_ / fallingTime_) : 1.0f;
+void Boss::BeginCharge_() {
+	state_ = State::Charge;
+	stateTimer_ = 0.0f;
+}
+
+//-------------------------------------------
+// Charge：後ろに反る
+//-------------------------------------------
+void Boss::UpdateCharge_(float /*dt*/) {
+	float t = (chargeTime_ > 0.0f) ? (stateTimer_ / chargeTime_) : 1.0f;
 	if (t > 1.0f)
 		t = 1.0f;
 
-	// 0 → maxAngle_ に向かって増加
-	currentAngle_ = maxAngle_ * t;
+	// イージング（スムーズステップ）
+	float tt = t * t * (3.0f - 2.0f * t);
+
+	float backAngle = -PI * 0.35f; // ちょっと後ろに反る
+	currentAngle_ = backAngle * tt;
+
+	if (stateTimer_ >= chargeTime_) {
+		BeginSlam_();
+	}
+}
+
+//-------------------------------------------
+// Slam 開始：叩きつけフェーズへ
+//-------------------------------------------
+void Boss::BeginSlam_() {
+	state_ = State::Slam;
+	stateTimer_ = 0.0f;
+	terrainHitNotified_ = false;
+}
+
+//-------------------------------------------
+// Slam：素早く叩きつける（地面ヒットで凹ませ通知）
+//-------------------------------------------
+void Boss::UpdateSlam_(float /*dt*/) {
+	float t = (slamTime_ > 0.0f) ? (stateTimer_ / slamTime_) : 1.0f;
+	if (t > 1.0f)
+		t = 1.0f;
+
+	// 速く加速して叩きつけるイメージ
+	float tt = t * t * (3.0f - 2.0f * t);
+
+	float backAngle = -PI * 0.35f;
+	currentAngle_ = backAngle + (maxAngle_ - backAngle) * tt;
 
 	// 棒の先端と地形の衝突判定
 	bool hitGround = false;
@@ -167,39 +248,70 @@ void Boss::UpdateFalling_(float /*dt*/) {
 			NotifyTerrainHit_();
 			terrainHitNotified_ = true;
 		}
-		state_ = State::Recover;
-		stateTimer_ = 0.0f;
+		BeginStuck_();
 		return;
 	}
 
-	// 安全策：時間切れになったら強制的に戻る
-	if (stateTimer_ >= fallingTime_) {
+	// 時間切れでも一応ヒット扱いにしておく
+	if (stateTimer_ >= slamTime_) {
 		if (!terrainHitNotified_) {
 			NotifyTerrainHit_();
 			terrainHitNotified_ = true;
 		}
-		state_ = State::Recover;
-		stateTimer_ = 0.0f;
+		BeginStuck_();
 	}
 }
 
 //-------------------------------------------
-// 復帰：角度を 0 に戻す
+// Stuck 開始：刺さった姿勢を保存
+//-------------------------------------------
+void Boss::BeginStuck_() {
+	state_ = State::Stuck;
+	stateTimer_ = 0.0f;
+	stuckAngle_ = currentAngle_;
+}
+
+//-------------------------------------------
+// Stuck：刺さったまま少し揺れる
+//-------------------------------------------
+void Boss::UpdateStuck_(float /*dt*/) {
+	// 刺さった角度＋小さな揺れ
+	float shake = 0.05f * std::sin(stateTimer_ * 30.0f);
+	currentAngle_ = stuckAngle_ + shake;
+
+	if (stateTimer_ >= stuckTime_) {
+		BeginRecover_();
+	}
+}
+
+//-------------------------------------------
+// Recover 開始：元に戻る
+//-------------------------------------------
+void Boss::BeginRecover_() {
+	state_ = State::Recover;
+	stateTimer_ = 0.0f;
+	recoverStartAngle_ = currentAngle_;
+}
+
+//-------------------------------------------
+// Recover：角度を 0 に戻す
 //-------------------------------------------
 void Boss::UpdateRecover_(float /*dt*/) {
 	float t = (recoverTime_ > 0.0f) ? (stateTimer_ / recoverTime_) : 1.0f;
 	if (t > 1.0f)
 		t = 1.0f;
 
-	float start = currentAngle_;
-	float end = 0.0f;
+	float tt = t * t * (3.0f - 2.0f * t);
 
-	currentAngle_ = start + (end - start) * t;
+	currentAngle_ = recoverStartAngle_ * (1.0f - tt);
 
 	if (stateTimer_ >= recoverTime_) {
-		state_ = State::Idle;
+		state_ = State::Waiting;
 		stateTimer_ = 0.0f;
 		currentAngle_ = 0.0f;
+
+		// 向きは最後に狙った方向のままにする
+		aimStartAxis_ = fallAxis_;
 	}
 }
 
@@ -218,7 +330,6 @@ void Boss::UpdateTransformFromPose_() {
 	dir.z = fallAxis_.z * s;
 
 	// ---- ここで「前進／後退」の量を決める ----
-	// currentAngle_ が 0 → 0, maxAngle_ → slideMax になるように補間
 	const float slideMax = 2.0f; // ☆お好みで距離を調整（前にどれくらい出すか）
 	float t = 0.0f;
 	if (maxAngle_ > 0.0001f) {
