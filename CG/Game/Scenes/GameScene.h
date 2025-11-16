@@ -10,6 +10,7 @@
 #include "WindowDX.h"
 #include <DirectXMath.h> // ← 追加（XMFLOAT3 用）
 #include <algorithm>     // ← 追加（std::clamp 用）
+#include <chrono>
 
 namespace Engine {
 
@@ -61,6 +62,11 @@ private:
 	LONG prevMouseY_ = 0;
 
 	bool prevRB_ = false; // 右クリックの前フレーム状態
+
+	// ==== FPS 計測用 ====
+	float fps_ = 0.0f;
+	int fpsFrameCount_ = 0;
+	std::chrono::steady_clock::time_point fpsLastTime_;
 };
 
 } // namespace Engine

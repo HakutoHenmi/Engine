@@ -2,6 +2,9 @@
 #include <Windows.h>
 #include <chrono>
 #include <dinput.h>
+#include <mmsystem.h>
+#include <thread>
+#pragma comment(lib, "winmm.lib")
 
 using namespace std::chrono;
 
@@ -57,9 +60,19 @@ void App::Run() {
 	MSG msg = {};
 	bool running = true;
 
-	auto prev = steady_clock::now();
+	// ★ スリープ精度を 1ms に上げる
+	timeBeginPeriod(1);
+
+	using clock = std::chrono::steady_clock;
+	using micro = std::chrono::microseconds;
+
+	const micro kMinTime(16667);  // 1/60 秒 ≒ 16.667ms
+	const micro kMinCheck(15000); // 15ms を超えたらビジーウェイトに切り替える
+
+	auto reference = clock::now();
 
 	while (running) {
+		// --- メッセージ処理 ---
 		while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) {
 				running = false;
@@ -71,24 +84,43 @@ void App::Run() {
 		if (!running)
 			break;
 
-		// dt 計算（必要ならシーン側で取得）
-		auto now = steady_clock::now();
-		float dt = duration<float>(now - prev).count();
-		(void)dt;
-		prev = now;
+		// ==== 60FPS 固定処理 ====
+		auto now = clock::now();
+		auto elapsed = std::chrono::duration_cast<micro>(now - reference);
 
-		// 入力アップデート（必要なら Scene 側で参照）
+		if (elapsed < kMinTime) {
+			// まずは 1ms スリープで 1/60秒手前まで近づく
+			while (elapsed < kMinCheck) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				now = clock::now();
+				elapsed = std::chrono::duration_cast<micro>(now - reference);
+			}
+
+			// 残りわずかはビジーウェイトで微調整
+			while (elapsed < kMinTime) {
+				now = clock::now();
+				elapsed = std::chrono::duration_cast<micro>(now - reference);
+			}
+		}
+
+		// 実際にかかったフレーム時間から dt を計算（必要なら使う）
+		float dt = std::chrono::duration<float>(now - reference).count();
+		(void)dt;
+		reference = now;
+		// =========================
+
+		// 入力更新
 		input_.Update();
 
-		// === 1フレーム ===
+		// 1フレーム分の処理
 		BeginFrame_();
-
-		// --- シーン更新・描画（ゲーム管理は SceneManager に一任） ---
 		sceneManager_.Update();
 		sceneManager_.Draw();
-
 		EndFrame_();
 	}
+
+	// ★ 元に戻す
+	timeEndPeriod(1);
 }
 
 void App::Shutdown() {
