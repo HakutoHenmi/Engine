@@ -1,4 +1,6 @@
 #include "App.h"
+#include "SpriteRenderer.h"
+#include "TextureManager.h"
 #include <Windows.h>
 #include <chrono>
 #include <dinput.h>
@@ -25,6 +27,18 @@ bool App::Initialize(HINSTANCE hInst, int cmdShow) {
 	// 3) Renderer & ImGui
 	if (!renderer_.Initialize(dx_))
 		return false;
+
+	// ===========================
+	//  TextureManager 初期化
+	// ===========================
+	Engine::TextureManager::Instance().Initialize(&dx_, &renderer_);
+
+	// ===========================
+	//  SpriteRenderer 初期化
+	// ===========================
+	spriteRenderer_ = std::make_unique<Engine::SpriteRenderer>();
+	spriteRenderer_->Initialize(&dx_);
+
 	if (!imgui_.Initialize(hwnd_, dx_))
 		return false;
 

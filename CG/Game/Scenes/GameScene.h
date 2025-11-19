@@ -6,7 +6,10 @@
 #include "ParticleEmitter.h"
 #include "Player.h"
 #include "Renderer.h"
+#include "Sprite2D.h"
+#include "SpriteRenderer.h"
 #include "Stage.h"
+#include "TextureManager.h"
 #include "WindowDX.h"
 #include <DirectXMath.h> // ← 追加（XMFLOAT3 用）
 #include <algorithm>     // ← 追加（std::clamp 用）
@@ -26,6 +29,7 @@ public:
 	std::string Next() const override { return next_; }
 
 private:
+	Engine::SpriteRenderer* sprite_ = nullptr;
 	WindowDX* dx_ = nullptr;
 	Renderer renderer_;
 	Input input_;
@@ -38,6 +42,9 @@ private:
 
 	Stage stage_;
 	Player player_;
+
+	// UIで使いたいメンバを追加
+	Anchor::Sprite2D testSprite_;
 
 	std::unique_ptr<Game::Boss> boss_;
 	void ApplyBossHitToTerrain_(const Game::TerrainHitInfo& info); // 地形を凹ませる用
