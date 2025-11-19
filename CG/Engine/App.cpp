@@ -157,6 +157,7 @@ void App::Shutdown() {
 	renderer_.Shutdown();
 	audio_.Shutdown();
 	input_.Shutdown();
+	dx_.WaitIdle();
 	dx_.Shutdown();
 
 	fence_.Reset();

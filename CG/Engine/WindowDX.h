@@ -35,8 +35,8 @@ public:
 	UINT DsvInc() const { return dsvInc_; }
 	UINT FrameIndex() const { return fi_; }
 
-	   HINSTANCE GetHInstance() const { return hInst_; }
-    HWND GetHwnd() const { return hwnd_; }
+	HINSTANCE GetHInstance() const { return hInst_; }
+	HWND GetHwnd() const { return hwnd_; }
 
 	// ImGuiフォントSRVの確保位置
 	int FontSrvIndex() const { return 3; } // [0]=Model, [1]=Sprite0, [2]=Sprite1, [3]=ImGui
@@ -48,6 +48,8 @@ public:
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE GetDSV() const { return dsvH_->GetCPUDescriptorHandleForHeapStart(); }
+
+	void WaitIdle();
 
 private:
 	static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);

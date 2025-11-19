@@ -1806,11 +1806,22 @@ bool Renderer::InitLaserPSO(ID3D12Device* device, ID3D12RootSignature* rs) {
 
 	// 加算ブレンド（光る線っぽく）
 	D3D12_BLEND_DESC blend{};
-	blend.RenderTarget[0].BlendEnable = TRUE;
-	blend.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-	blend.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
-	blend.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-	blend.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	blend.AlphaToCoverageEnable = FALSE;
+	blend.IndependentBlendEnable = FALSE;
+
+	auto& rt = blend.RenderTarget[0];
+	rt.BlendEnable = TRUE;
+	rt.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	rt.DestBlend = D3D12_BLEND_ONE;
+	rt.BlendOp = D3D12_BLEND_OP_ADD;
+
+	// ★アルファチャンネル側も必ず埋める
+	rt.SrcBlendAlpha = D3D12_BLEND_ONE;
+	rt.DestBlendAlpha = D3D12_BLEND_ZERO;
+	rt.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+
+	rt.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
 	desc.BlendState = blend;
 
 	// ===== 深度無効化 =====
