@@ -11,6 +11,10 @@ namespace Engine {
 
 void GameScene::Initialize(WindowDX* dx) {
 	dx_ = dx;
+
+	// ★ SpriteRenderer シングルトンから取得
+	sprite_ = Engine::SpriteRenderer::Instance();
+
 	end_ = false;
 	next_.clear();
 	waitRelease_ = true;
@@ -60,6 +64,16 @@ void GameScene::Initialize(WindowDX* dx) {
 	p.initVelMin = {-1.6f, 2.8f, -1.6f};
 	p.initVelMax = {+1.6f, 5.0f, +1.6f};
 	p.spawnPosJitter = {0.40f, 0.60f, 0.40f};
+
+	// UIの初期化
+
+	// テストスプライト
+	if (sprite_) {
+		testSprite_.Initialize(sprite_, L"Resources/UI/uvChecker.png");
+		testSprite_.SetPosition(50.0f, 50.0f);  // 左上あたり
+		testSprite_.SetSize(200.0f, 100.0f);    // 幅200, 高さ100
+		testSprite_.SetColor(1.0f, 1.0f, 1.0f); // 白
+	}
 
 	// ===============================
 	// 4. Stage 初期化
@@ -361,6 +375,8 @@ void GameScene::Draw() {
 	if (boss_) {
 		boss_->Draw(renderer_, dx_->List(), *activeCam_);
 	}
+
+	testSprite_.Draw();
 
 	// ==== ImGui FPS カウンター ====
 	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always); // 画面左上固定

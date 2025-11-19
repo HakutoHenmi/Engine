@@ -1939,4 +1939,26 @@ Vector3 Renderer::TerrainNormalAt(float x, float z) const {
 	return n;
 }
 
+int Renderer::AllocateSRV() {
+	return nextSrvIndex_++; // 既存の管理と同じ
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE Renderer::GetSRVCPU(int index) const {
+	D3D12_CPU_DESCRIPTOR_HANDLE h{};
+	if (!srvHeap_)
+		return h;
+	h = srvHeap_->GetCPUDescriptorHandleForHeapStart();
+	h.ptr += static_cast<SIZE_T>(index) * descriptorSize_;
+	return h;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE Renderer::GetSRVGPU(int index) const {
+	D3D12_GPU_DESCRIPTOR_HANDLE h{};
+	if (!srvHeap_)
+		return h;
+	h = srvHeap_->GetGPUDescriptorHandleForHeapStart();
+	h.ptr += static_cast<UINT64>(index) * descriptorSize_;
+	return h;
+}
+
 } // namespace Engine

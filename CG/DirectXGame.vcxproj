@@ -183,6 +183,8 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClCompile Include="Engine\Particle.cpp" />
     <ClCompile Include="Engine\Renderer.cpp" />
     <ClCompile Include="Engine\SceneManager.cpp" />
+    <ClCompile Include="Engine\SpriteRenderer.cpp" />
+    <ClCompile Include="Engine\TextureManager.cpp" />
     <ClCompile Include="Engine\WindowDX.cpp" />
     <ClCompile Include="externals\imgui\imgui.cpp" />
     <ClCompile Include="externals\imgui\imgui_demo.cpp" />
@@ -200,6 +202,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClCompile Include="Game\Actors\ParticleEmitter.cpp" />
     <ClCompile Include="Game\Actors\ParticleSystem.cpp" />
     <ClCompile Include="Game\Actors\Player.cpp" />
+    <ClCompile Include="Game\Actors\Sprite2D.cpp" />
     <ClCompile Include="Game\Actors\Stage.cpp" />
     <ClCompile Include="Game\Scenes\GameScene.cpp" />
     <ClCompile Include="Game\Scenes\ResultScene.cpp" />
@@ -319,6 +322,8 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClInclude Include="Engine\Particle.h" />
     <ClInclude Include="Engine\Renderer.h" />
     <ClInclude Include="Engine\SceneManager.h" />
+    <ClInclude Include="Engine\SpriteRenderer.h" />
+    <ClInclude Include="Engine\TextureManager.h" />
     <ClInclude Include="Engine\Transform.h" />
     <ClInclude Include="Engine\WindowDX.h" />
     <ClInclude Include="externals\imgui\imconfig.h" />
@@ -339,6 +344,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClInclude Include="Game\Actors\ParticleEmitter.h" />
     <ClInclude Include="Game\Actors\ParticleSystem.h" />
     <ClInclude Include="Game\Actors\Player.h" />
+    <ClInclude Include="Game\Actors\Sprite2D.h" />
     <ClInclude Include="Game\Actors\Stage.h" />
     <ClInclude Include="Game\Scenes\GameScene.h" />
     <ClInclude Include="Game\Scenes\ResultScene.h" />

@@ -68,6 +68,14 @@ public:
 	ID3D12Device* GetDevice(WindowDX& dx) { return dx.Dev(); }
 	ID3D12GraphicsCommandList* GetCommandList(WindowDX& dx) { return dx.List(); }
 
+	// ==== SRVヒープ（TextureManagerなど向け） ====
+	ID3D12DescriptorHeap* GetSRVHeap() const { return srvHeap_.Get(); }
+	UINT GetSRVDescriptorSize() const { return descriptorSize_; }
+	int AllocateSRV(); // 新しいSRVスロットを一つ確保
+
+	D3D12_CPU_DESCRIPTOR_HANDLE GetSRVCPU(int index) const;
+	D3D12_GPU_DESCRIPTOR_HANDLE GetSRVGPU(int index) const;
+
 	// モデル：多スロットCB
 	void UpdateModelCBWithColorAt(int handle, size_t slot, const Camera& cam, const Transform& tf, const Vector4& mulColor);
 	void DrawModelAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot);

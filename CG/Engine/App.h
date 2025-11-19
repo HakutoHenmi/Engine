@@ -6,6 +6,8 @@
 #include "Matrix4x4.h"
 #include "Renderer.h"
 #include "SceneManager.h"
+#include "SpriteRenderer.h"
+#include "TextureManager.h"
 #include "WindowDX.h"
 #include <Windows.h>
 #include <chrono>
@@ -35,6 +37,7 @@ private:
 
 private:
 	SceneManager sceneManager_;
+	std::unique_ptr<SpriteRenderer> spriteRenderer_;
 	HWND hwnd_ = nullptr;
 	WindowDX dx_;
 	Input input_;

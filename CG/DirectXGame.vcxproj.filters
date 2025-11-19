@@ -123,6 +123,15 @@
     <ClCompile Include="Game\Actors\Boss.cpp">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\TextureManager.cpp">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\SpriteRenderer.cpp">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClCompile>
+    <ClCompile Include="Game\Actors\Sprite2D.cpp">
+      <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Resources\shaders\SpritePS.hlsl">
@@ -278,6 +287,15 @@
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClInclude>
     <ClInclude Include="Game\Actors\Boss.h">
+      <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\TextureManager.h">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\SpriteRenderer.h">
+      <Filter>ソース ファイル\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="Game\Actors\Sprite2D.h">
       <Filter>ソース ファイル\Game\Actor</Filter>
     </ClInclude>
   </ItemGroup>
