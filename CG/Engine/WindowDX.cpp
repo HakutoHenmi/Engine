@@ -192,7 +192,7 @@ bool WindowDX::Initialize(HINSTANCE hInst, int cmdShow, HWND& outHwnd) {
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC hd{};
 		hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		hd.NumDescriptors = 4;
+		hd.NumDescriptors = 16384;
 		hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		hr = dev_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&srvH_));
 		assert(SUCCEEDED(hr));
@@ -268,6 +268,8 @@ void WindowDX::WaitGPU() {
 		WaitForSingleObject(fev_, INFINITE);
 	}
 }
+
+void WindowDX::WaitIdle() { WaitGPU(); }
 
 // ------------------------ Handle utils ------------------------
 D3D12_CPU_DESCRIPTOR_HANDLE WindowDX::SRV_CPU(int offset) const {

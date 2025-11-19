@@ -378,6 +378,7 @@ void GameScene::Draw() {
 
 	testSprite_.Draw();
 
+#ifdef _DEBUG
 	// ==== ImGui FPS カウンター ====
 	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always); // 画面左上固定
 	ImGui::SetNextWindowBgAlpha(0.35f);                        // 半透明背景
@@ -402,6 +403,7 @@ void GameScene::Draw() {
 	ImGui::PopStyleColor(2);
 	ImGui::PopStyleVar();
 	// ==============================
+#endif
 
 	renderer_.EndFrame(cmd);
 }
