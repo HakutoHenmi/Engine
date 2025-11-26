@@ -113,6 +113,9 @@ inline Vector3 Normalize(const Vector3& v) {
 	return {0, 0, 0};
 }
 
+//線形補間
+inline Vector3 Lerp(const Vector3& a, const Vector3& b, float t) { return Vector3{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t}; }
+
 // プリズム反射（Reflect＋45度方向ずらす例）
 inline Vector3 Prizm(const Vector3& dir, const Vector3& normal) {
 	// まず通常の反射

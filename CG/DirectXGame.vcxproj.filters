@@ -28,6 +28,9 @@
     <Filter Include="ソース ファイル\Game\Actor">
       <UniqueIdentifier>{1b8a212d-f913-4237-b9a5-c4768682ceed}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ソース ファイル\Engine\Water">
+      <UniqueIdentifier>{38a9850e-3563-4f08-a318-e41c64f3e947}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -131,6 +134,9 @@
     </ClCompile>
     <ClCompile Include="Game\Actors\Sprite2D.cpp">
       <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Water\WaterSurface.cpp">
+      <Filter>ソース ファイル\Engine\Water</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -297,6 +303,9 @@
     </ClInclude>
     <ClInclude Include="Game\Actors\Sprite2D.h">
       <Filter>ソース ファイル\Game\Actor</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Water\WaterSurface.h">
+      <Filter>ソース ファイル\Engine\Water</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

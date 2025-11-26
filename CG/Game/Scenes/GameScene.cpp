@@ -3,16 +3,57 @@
 #include "imgui.h"
 #include <Windows.h>
 #include <Xinput.h>
+#include <cmath>
+#include <random>
 #pragma comment(lib, "xinput9_1_0.lib")
 
 using namespace DirectX;
 
+namespace {
+
+// Windows の ShowCursor は内部カウンタ制御なので、
+// 目的の状態になるまで回して強制的に合わせる
+void ForceCursorVisible(bool visible) {
+	if (visible) {
+		// カウンタが 0 以上になるまで TRUE を投げる
+		while (ShowCursor(TRUE) < 0) {
+			// 何もしない
+		}
+	} else {
+		// カウンタが -1 以下になるまで FALSE を投げる
+		while (ShowCursor(FALSE) >= 0) {
+			// 何もしない
+		}
+	}
+}
+
+} // namespace
+
 namespace Engine {
+
+// ==== カメラの前方向ベクトルを取るヘルパ ====
+// cam.View() の逆行列から「前向き（+Z）」を取り出す
+static Vector3 GetCameraForward(const Camera& cam) {
+	using namespace DirectX;
+
+	XMMATRIX view = cam.View();
+	XMMATRIX inv = XMMatrixInverse(nullptr, view); // view の逆＝カメラのワールド変換
+
+	XMFLOAT3 f;
+	f.x = inv.r[2].m128_f32[0]; // 前方向 (row 2)
+	f.y = inv.r[2].m128_f32[1];
+	f.z = inv.r[2].m128_f32[2];
+
+	XMVECTOR v = XMLoadFloat3(&f);
+	v = XMVector3Normalize(v);
+	XMStoreFloat3(&f, v);
+
+	return Vector3{f.x, f.y, f.z};
+}
 
 void GameScene::Initialize(WindowDX* dx) {
 	dx_ = dx;
 
-	// ★ SpriteRenderer シングルトンから取得
 	sprite_ = Engine::SpriteRenderer::Instance();
 
 	end_ = false;
@@ -56,9 +97,9 @@ void GameScene::Initialize(WindowDX* dx) {
 	auto& p = sparks_.Params();
 	p.maxOnce = 256;
 	p.useAdditive = true;
-	p.initColor = {1.0f, 0.85f, 0.35f, 1.0f};
-	p.initScaleMin = {0.35f, 0.35f, 0.35f};
-	p.initScaleMax = {0.55f, 0.55f, 0.55f};
+	p.initColor = {0.3f, 0.2f, 0.1f, 0.5f};
+	p.initScaleMin = {0.05f, 0.05f, 0.05f};
+	p.initScaleMax = {0.10f, 0.10f, 0.10f};
 	p.lifeMin = 0.30f;
 	p.lifeMax = 0.55f;
 	p.initVelMin = {-1.6f, 2.8f, -1.6f};
@@ -74,11 +115,6 @@ void GameScene::Initialize(WindowDX* dx) {
 		testSprite_.SetSize(200.0f, 100.0f);    // 幅200, 高さ100
 		testSprite_.SetColor(1.0f, 1.0f, 1.0f); // 白
 	}
-
-	// ===============================
-	// 4. Stage 初期化
-	// ===============================
-	stage_.Initialize(renderer_, *dx_, *activeCam_, "Resources/Maps/Stage1_Map.csv", "Resources/Maps/Stage1_Angle.csv", 1.0f, 1.0f, 1.0f, GridAnchor::Center, ModelOrigin::Center, 0.02f, 0.02f);
 
 	// --- ボス生成 ---
 	boss_ = std::make_unique<Game::Boss>();
@@ -102,16 +138,38 @@ void GameScene::Initialize(WindowDX* dx) {
 	// ★XZ 位置からボクセル地形の高さを返すコールバック
 	boss_->SetTerrainHeightCallback([this](const Engine::Vector3& pos) { return renderer_.TerrainHeightAt(pos.x, pos.z); });
 
+	// 巨大地面をロード
+	outerGroundHandle_ = renderer_.LoadModel(dx_->Dev(), dx_->List(), "Resources/Plane/Plane.obj");
+
+	// Transform 設定
+	outerGroundTf_.scale = {6000.0f, 6000.0f, 6000.0f};
+	outerGroundTf_.rotate = {XMConvertToRadians(-90.0f), 0.0f, 0.0f};
+	outerGroundTf_.translate = {0.0f, -5.0f, 0.0f};
+
+	// ---- 水面の生成 ----
+	Engine::WaterSurfaceDesc wd;
+	wd.sizeX = 1000.0f; // 島を囲むくらいに調整
+	wd.sizeZ = 1000.0f;
+	wd.tessX = 200;
+	wd.tessZ = 200;
+	wd.height = -2.0f; // 海面の高さ（好みで調整）
+
+	water_ = std::make_unique<Engine::WaterSurface>();
+	water_->Initialize(*dx_, wd);
+
 	// ===============================
-	// 5. Grid 初期化
+	// 5. Grid 初期化（Stage 依存なし版）
 	// ===============================
 	{
-		const float pitchX = stage_.PitchX();
-		const float pitchZ = stage_.PitchZ();
-		const int cols = stage_.Cols();
-		const int rows = stage_.Rows();
+		// ボクセル地形のサイズに合わせて、適当なグリッドを引く
+		const float pitchX = 1.0f; // X 方向の格子間隔
+		const float pitchZ = 1.0f; // Z 方向の格子間隔
+		const int cols = 64;       // X 方向の本数
+		const int rows = 64;       // Z 方向の本数
+
 		const float minX = -0.5f * cols * pitchX;
 		const float minZ = -0.5f * rows * pitchZ;
+
 		renderer_.InitGrid(*dx_, (std::max)(cols, rows), pitchX, 0.0f, minX, minZ);
 	}
 
@@ -123,10 +181,65 @@ void GameScene::Initialize(WindowDX* dx) {
 	fpsLastTime_ = std::chrono::steady_clock::now();
 	fpsFrameCount_ = 0;
 	fps_ = 0.0f;
+
+	// ==== カーソル固定 ＋ 非表示 ====
+	cursorFree_ = false;
+	ForceCursorVisible(cursorFree_);
+
+	// 画面領域を取得してゲームウィンドウ内部に固定
+	ClipCursor(NULL);
+	RECT rect;
+	GetClientRect(dx_->GetHwnd(), &rect);
+	ClientToScreen(dx_->GetHwnd(), (POINT*)&rect.left);
+	ClientToScreen(dx_->GetHwnd(), (POINT*)&rect.right);
+	ClipCursor(&rect);
 }
 
 void GameScene::Update() {
 	input_.Update();
+	DrawImGui_();
+
+	// ==== F3 押し中だけカーソル解放 ====
+	{
+		bool F3Now = (GetAsyncKeyState(VK_F3) & 0x8000) != 0;
+
+		if (F3Now && !cursorFree_) {
+			// ゲームモード → フリーモードに入る
+			cursorFree_ = true;
+
+			// 範囲ロック解除（画面全体でOKなら NULL）
+			ClipCursor(NULL);
+		} else if (!F3Now && cursorFree_) {
+			// フリーモード → ゲームモードに戻る
+			cursorFree_ = false;
+
+			// 再度ウィンドウ内にロック
+			RECT rect;
+			GetClientRect(dx_->GetHwnd(), &rect);
+			ClientToScreen(dx_->GetHwnd(), (POINT*)&rect.left);
+			ClientToScreen(dx_->GetHwnd(), (POINT*)&rect.right);
+			ClipCursor(&rect);
+
+			// 戻した瞬間に一旦中心に置いとく
+			POINT center;
+			center.x = (rect.right + rect.left) / 2;
+			center.y = (rect.bottom + rect.top) / 2;
+			SetCursorPos(center.x, center.y);
+		}
+	}
+
+	// カーソル表示状態を強制セット
+	ForceCursorVisible(cursorFree_);
+
+	// ==== ESC でアプリ終了 ====
+	if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+		// 終了前に必ず元の状態に戻す
+		ForceCursorVisible(true); // カーソルを確実に表示状態に
+		ClipCursor(NULL);         // マウスの移動制限を解除
+
+		PostQuitMessage(0); // メインループに WM_QUIT を送る
+		return;             // 以降の更新はスキップ
+	}
 
 	// ==== FPS 計測 ====
 	fpsFrameCount_++;
@@ -144,7 +257,6 @@ void GameScene::Update() {
 	if (nowF1 && !prevF1_) {
 		useDebugCam_ = !useDebugCam_;
 		activeCam_ = useDebugCam_ ? &camDebug_ : &camPlay_;
-		stage_.SetCamera(activeCam_);
 	}
 	prevF1_ = nowF1;
 
@@ -153,231 +265,186 @@ void GameScene::Update() {
 		gridVisible_ = !gridVisible_;
 	}
 
-	// === プレイヤー更新 ===
-	Vector3 prevPos = player_.GetPos(); // 移動前
-	player_.Update(*activeCam_, input_);
-	Vector3 newPos = player_.GetPos(); // 移動後
+	// ==== マウス中央固定 ====
+	if (!cursorFree_) {
+		POINT center;
+		RECT rc;
+		GetClientRect(dx_->GetHwnd(), &rc);
+		center.x = (rc.right - rc.left) / 2;
+		center.y = (rc.bottom - rc.top) / 2;
+		ClientToScreen(dx_->GetHwnd(), &center);
+		SetCursorPos(center.x, center.y);
 
-	// --- ボス更新（プレイヤー位置を渡す）---
-	Engine::Vector3 playerPos = player_.GetPos();
-	float dt = 1.0f / 60.0f; // 今は固定フレームと同じ
-	if (boss_) {
-		boss_->Update(dt, playerPos);
-	}
+		// === プレイヤー更新 ===
+		Vector3 prevPos = player_.GetPos(); // 移動前
 
-	// === 壁との当たり判定（半径あり：Collide & Slide） ===
-	const auto& walls = stage_.GetWallsDynamic();
-
-	// プレイヤーの当たり半径（見た目に合わせて調整）
-	const float playerRadius = 0.45f;
-
-	auto IsHitExpanded = [&](const AABB& box, const Vector3& p) -> bool {
-		// 壁AABBを半径ぶん膨らませる（めり込み防止）
-		const Vector3 minE{box.min.x - playerRadius, box.min.y - playerRadius, box.min.z - playerRadius};
-		const Vector3 maxE{box.max.x + playerRadius, box.max.y + playerRadius, box.max.z + playerRadius};
-		return (p.x >= minE.x && p.x <= maxE.x) && (p.y >= minE.y && p.y <= maxE.y) && (p.z >= minE.z && p.z <= maxE.z);
-	};
-
-	Vector3 cur = prevPos;
-	Vector3 next = newPos;
-
-	// ---- X軸だけ先に動かして衝突したらXを打ち消す
-	Vector3 tryX = {next.x, cur.y, cur.z};
-	bool hitX = false;
-	for (const auto& w : walls) {
-		if (IsHitExpanded(w, tryX)) {
-			hitX = true;
-			break;
+		// ★★ ヒットストップ中はプレイヤー更新を止める ★★
+		if (hitStopTimer_ <= 0.0f) {
+			player_.Update(*activeCam_, input_);
 		}
-	}
-	if (!hitX)
-		cur.x = tryX.x;
+		Vector3 newPos = player_.GetPos(); // 移動後
 
-	// ---- Z軸も同様（スライド）
-	Vector3 tryZ = {cur.x, cur.y, next.z};
-	bool hitZ = false;
-	for (const auto& w : walls) {
-		if (IsHitExpanded(w, tryZ)) {
-			hitZ = true;
-			break;
-		}
-	}
-	if (!hitZ)
-		cur.z = tryZ.z;
+		// --- ボス更新（プレイヤー位置を渡す）---
+		Engine::Vector3 playerPos = player_.GetPos();
 
-	// ---- Y軸（ジャンプ/落下）
-	Vector3 tryY = {cur.x, next.y, cur.z};
-	bool hitY = false;
-	for (const auto& w : walls) {
-		if (IsHitExpanded(w, tryY)) {
-			hitY = true;
-			break;
-		}
-	}
-	if (!hitY) {
-		cur.y = tryY.y;
-	} else {
-		// Yが衝突したら落下速度を止める（2段ジャンプ安定）
-		player_.SetVelocityY(0.0f); // ← プレイヤー側に用意済み前提
-	}
+		// ★ 生 dt（固定）
+		const float baseDt = 1.0f / 60.0f;
 
-	// 位置反映
-	player_.SetPos(cur);
-
-	// === 右クリックで板ポリパーティクル大量発生 ===
-	const bool rbNow = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
-	if (rbNow) {
-		// 出す位置：プレイヤーの少し前＆少し上
-		Engine::Vector3 pos = player_.GetPos();
-		// プレイヤー前方へ 0.8m・上へ 0.6m（大きく散らすので中心だけ上げる）
-		// 前方はカメラ向きでもOK：ここではカメラ前方を使う
-		const float cy = std::cos(camYaw_), sy = std::sin(camYaw_);
-		pos.x += cy * 0.8f;
-		pos.z += sy * 0.8f;
-		pos.y += 0.6f;
-		sparks_.SetPosition(pos);
-		// 毎フレ複数回バーストして“ドバッ”と出す
-		sparks_.Burst(256);
-		sparks_.Burst(256);
-		if (!prevRB_) {
-			sparks_.Burst(512);
-		}
-	}
-	prevRB_ = rbNow;
-
-	// === ステージ更新 ===
-	stage_.SetPlayerEffect(player_.GetPos(), 6.0f);
-	stage_.Update();
-
-	// === TPS遅延カメラ（相対マウス入力 / 画面端でも止まらない） ===
-	if (!useDebugCam_) {
-		using namespace DirectX;
-
-		// --- ズーム（ホイール） ---
-		float wheel = input_.GetMouseWheelDelta();
-		if (wheel != 0.0f) {
-			camDist_ -= wheel * 1.0f; // 上で近づく
-			camDist_ = std::clamp(camDist_, 3.0f, 20.0f);
-		}
-
-		// --- マウス相対移動（DirectInputのΔ。画面端に依存しない） ---
-		const float dx = input_.GetMouseDeltaX();
-		const float dy = input_.GetMouseDeltaY();
-
-		// --- 角度更新（左右逆・上下逆の指定） ---
-		const float mouseSensitivity = 0.002f;
-		camYaw_ -= dx * mouseSensitivity;   // 左右
-		camPitch_ += dy * mouseSensitivity; // 上下
-		camPitch_ = std::clamp(camPitch_, -1.2f, 1.2f);
-
-		// --- 追従対象座標 ---
-		// const Vector3 playerPos = player_.GetPos();
-
-		// 目標カメラ位置（オービット）
-		const float cx = playerPos.x - std::cos(camYaw_) * std::cos(camPitch_) * camDist_;
-		const float cz = playerPos.z - std::sin(camYaw_) * std::cos(camPitch_) * camDist_;
-		const float cy = playerPos.y + std::sin(camPitch_) * camDist_ + camHeight_;
-		XMFLOAT3 targetCamPos{cx, cy, cz};
-
-		// ================================
-		// カメラ衝突：球スイープでクリップ防止
-		// ================================
-		const float camRadius = 0.30f; // カメラ球半径
-		const float skin = 0.02f;      // 押し戻し
-
-		Engine::Vector3 eye{playerPos.x, playerPos.y + 1.0f, playerPos.z};
-		Engine::Vector3 desired{targetCamPos.x, targetCamPos.y, targetCamPos.z};
-
-		const auto& camWalls = stage_.GetWallsDynamic();
-
-		float bestT = 1.0f;
-		Engine::Vector3 bestN{0, 0, 0};
-		bool hit = false;
-
-		// 壁AABBをカメラ半径分“膨らませたAABB”に対して線分判定
-		for (const auto& wall : camWalls) {
-			AABB a = wall;
-			a.min.x -= camRadius;
-			a.min.y -= camRadius;
-			a.min.z -= camRadius;
-			a.max.x += camRadius;
-			a.max.y += camRadius;
-			a.max.z += camRadius;
-
-			float t;
-			Engine::Vector3 n;
-			if (Collision::IntersectSegmentAABB(eye, desired, a, t, n)) {
-				if (t < bestT) {
-					bestT = t;
-					bestN = n;
-					hit = true;
-				}
+		// ★ ヒットストップタイマー更新
+		if (hitStopTimer_ > 0.0f) {
+			hitStopTimer_ -= baseDt;
+			if (hitStopTimer_ < 0.0f) {
+				hitStopTimer_ = 0.0f;
 			}
 		}
 
-		// 衝突していれば手前で止める＋法線方向にskin押し戻し
-		Engine::Vector3 allowed = desired;
-		if (hit) {
-			Engine::Vector3 hitPos{eye.x + (desired.x - eye.x) * bestT, eye.y + (desired.y - eye.y) * bestT, eye.z + (desired.z - eye.z) * bestT};
-			allowed = {hitPos.x - bestN.x * skin, hitPos.y - bestN.y * skin, hitPos.z - bestN.z * skin};
+		// ★ ゲーム用 dt（ヒットストップを反映）
+		float gameDt = baseDt;
+		if (hitStopTimer_ > 0.0f) {
+			// 完全停止したいなら → gameDt = 0.0f;
+			gameDt *= hitStopScale_; // 0.05f くらいだと「ほぼ止まって見えるスロー」
 		}
 
-		// --- 遅延追従（衝突解決後の位置へ） ---
-		XMFLOAT3 noClipTarget{allowed.x, allowed.y, allowed.z};
-		const float followSpeed = 0.15f;
-		camPos_.x += (noClipTarget.x - camPos_.x) * followSpeed;
-		camPos_.y += (noClipTarget.y - camPos_.y) * followSpeed;
-		camPos_.z += (noClipTarget.z - camPos_.z) * followSpeed;
+		debugBaseDt_ = baseDt;
+		debugGameDt_ = gameDt;
 
-		// 反映と注視
-		camPlay_.SetPosition(camPos_);
-		XMFLOAT3 lookAt{playerPos.x, playerPos.y + 1.0f, playerPos.z};
-		camPlay_.LookAt(lookAt, XMFLOAT3{0, 1, 0});
+		if (boss_) {
+			boss_->Update(gameDt, playerPos);
+		}
+
+		if (water_) {
+			water_->Update(gameDt);
+		}
+
+		// 位置反映（ステージ壁コリジョンは一旦無し）
+		player_.SetPos(newPos);
+
+		// === マウス左クリック：攻撃 / 右クリック：緊急回避 ===
+
+		// 現在のマウスボタン状態
+		bool mouseLeftNow = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+		bool mouseRightNow = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
+
+		// 立ち上がり検出（「押した瞬間」）
+		static bool prevMouseLeft = false;
+		static bool prevMouseRight = false;
+
+		bool leftPressed = (mouseLeftNow && !prevMouseLeft);    // 攻撃開始
+		bool rightPressed = (mouseRightNow && !prevMouseRight); // 緊急回避開始
+
+		prevMouseLeft = mouseLeftNow;
+		prevMouseRight = mouseRightNow;
+
+		// --- 左クリック：攻撃（ここではエフェクト＋後でPlayer側と連携） ---
+		if (leftPressed) {
+			// 攻撃のエフェクト：プレイヤー前方に火花を出す
+			Engine::Vector3 pos = player_.GetPos();
+			const float cy = std::cos(camYaw_), sy = std::sin(camYaw_);
+			pos.x += cy * 0.8f;
+			pos.z += sy * 0.8f;
+			pos.y += 0.6f;
+			sparks_.SetPosition(pos);
+
+			// 一発ドバッと
+			sparks_.Burst(512);
+
+			// TODO: 実際の攻撃は Player 側で処理するなら、
+			// ここで「攻撃開始フラグ」を Player に伝えるようにしてください。
+		}
+
+		// --- 右クリック：緊急回避（ロール・ステップなど） ---
+		if (rightPressed) {
+			// 緊急回避用のエフェクト（少し弱めに）
+			Engine::Vector3 pos = player_.GetPos();
+			pos.y += 0.3f;
+			sparks_.SetPosition(pos);
+			sparks_.Burst(256);
+
+			// TODO: 実際の回避ロジックは Player 側で処理するなら、
+			// ここで Player に「回避入力」を伝えるようにしてください。
+		}
+
+		// === TPS遅延カメラ（相対マウス入力 / 画面端でも止まらない） ===
+		if (!useDebugCam_) {
+			using namespace DirectX;
+
+			// --- ズーム（ホイール） ---
+			float wheel = input_.GetMouseWheelDelta();
+			if (wheel != 0.0f) {
+				camDist_ -= wheel * 1.0f; // 上で近づく
+				camDist_ = std::clamp(camDist_, 3.0f, 20.0f);
+			}
+
+			// ★ 実際に使う距離（クリックで寄せるけど、攻撃中は固定）
+			float useDist = camDist_;
+
+			// --- マウス相対移動（攻撃中でも常にカメラ回転） ---
+			const float dx = input_.GetMouseDeltaX();
+			const float dy = input_.GetMouseDeltaY();
+
+			const float mouseSensitivity = 0.002f;
+
+			camYaw_ -= dx * mouseSensitivity;
+			camPitch_ += dy * mouseSensitivity;
+
+			// カメラの上下回転制限
+			camPitch_ = std::clamp(camPitch_, -1.2f, 1.2f);
+
+			// --- 追従対象座標 ---
+			// const Vector3 playerPos = player_.GetPos();
+
+			// 目標カメラ位置
+			const float cx = playerPos.x - std::cos(camYaw_) * std::cos(camPitch_) * useDist;
+			const float cz = playerPos.z - std::sin(camYaw_) * std::cos(camPitch_) * useDist;
+			const float cy = playerPos.y + std::sin(camPitch_) * useDist + camHeight_;
+			XMFLOAT3 targetCamPos{cx, cy, cz};
+
+			// ================================
+			// カメラ衝突：一旦「壁との衝突」は無しで、地形との接触だけ見る
+			// ================================
+			const float camRadius = 0.30f; // カメラ球半径
+
+			Engine::Vector3 eye{playerPos.x, playerPos.y + 1.0f, playerPos.z};
+			Engine::Vector3 desired{targetCamPos.x, targetCamPos.y, targetCamPos.z};
+
+			// とりあえず壁コリジョンなしで、そのまま希望位置へ
+			Engine::Vector3 allowed = desired;
+
+			// ===== ボクセル地形との衝突（地面にめり込まないように） =====
+			{
+				// この XZ での地形の高さを取得
+				float terrainY = renderer_.TerrainHeightAt(allowed.x, allowed.z);
+
+				// カメラ球の「底」が地面より下に行かないようにクランプ
+				if (allowed.y - camRadius < terrainY + 0.05f) {
+					allowed.y = terrainY + 0.05f + camRadius;
+				}
+			}
+
+			// --- 遅延追従（衝突解決後の位置へ） ---
+			XMFLOAT3 noClipTarget{allowed.x, allowed.y, allowed.z};
+			const float followSpeed = 0.15f;
+			camPos_.x += (noClipTarget.x - camPos_.x) * followSpeed;
+			camPos_.y += (noClipTarget.y - camPos_.y) * followSpeed;
+			camPos_.z += (noClipTarget.z - camPos_.z) * followSpeed;
+
+			// 反映と注視
+			camPlay_.SetPosition(camPos_);
+			XMFLOAT3 lookAt{playerPos.x, playerPos.y + 1.0f, playerPos.z};
+			camPlay_.LookAt(lookAt, XMFLOAT3{0, 1, 0});
+		}
+
+		// === シーン遷移（Gキーで切替） ===
+		if (input_.Trigger(DIK_G)) {
+			end_ = true;
+			next_ = "Result";
+		}
+
+		sparks_.Update(1.0f / 60.0f);
 	}
-
-	// === シーン遷移（Gキーで切替） ===
-	if (input_.Trigger(DIK_G)) {
-		end_ = true;
-		next_ = "Result";
-	}
-
-	sparks_.Update(1.0f / 60.0f);
 }
 
-void GameScene::ApplyBossHitToTerrain_(const Game::TerrainHitInfo& info) {
-	char buf[256];
-	std::snprintf(buf, sizeof(buf), "[BossHit] pos=(%.2f, %.2f, %.2f), r=%.2f, depth=%.2f\n", info.position.x, info.position.y, info.position.z, info.radius, info.depth);
-	OutputDebugStringA(buf);
-
-	// ★ボスの着弾位置を GPU ボクセル地形に凹みとして登録
-	DirectX::XMFLOAT3 pos{info.position.x, info.position.y, info.position.z};
-	renderer_.AddTerrainDent(pos, info.radius, info.depth);
-}
-
-void GameScene::Draw() {
-	ID3D12GraphicsCommandList* cmd = dx_->List();
-
-	// フレーム開始
-	renderer_.BeginFrame(cmd);
-
-	// ここで Compute
-	renderer_.DispatchVoxel(cmd, /*gridX=*/256, /*gridZ=*/256);
-	renderer_.DrawVoxel(cmd, *activeCam_);
-
-	// 既存の描画
-	if (gridVisible_) {
-		renderer_.DrawGrid(*activeCam_, cmd);
-	}
-	stage_.Draw(renderer_, cmd);
-	player_.Draw(renderer_, *activeCam_, cmd);
-	sparks_.Draw(cmd, *activeCam_);
-
-	if (boss_) {
-		boss_->Draw(renderer_, dx_->List(), *activeCam_);
-	}
-
-	testSprite_.Draw();
-
+void GameScene::DrawImGui_() {
 #ifdef _DEBUG
 	// ==== ImGui FPS カウンター ====
 	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always); // 画面左上固定
@@ -403,7 +470,56 @@ void GameScene::Draw() {
 	ImGui::PopStyleColor(2);
 	ImGui::PopStyleVar();
 	// ==============================
-#endif
+#endif // _DEBUG
+}
+
+void GameScene::ApplyBossHitToTerrain_(const Game::TerrainHitInfo& info) {
+	char buf[256];
+	std::snprintf(buf, sizeof(buf), "[BossHit] pos=(%.2f, %.2f, %.2f), r=%.2f, depth=%.2f\n", info.position.x, info.position.y, info.position.z, info.radius, info.depth);
+	OutputDebugStringA(buf);
+
+	// ★ボスの着弾位置を GPU ボクセル地形に凹みとして登録
+	DirectX::XMFLOAT3 pos{info.position.x, info.position.y, info.position.z};
+	renderer_.AddTerrainDent(pos, info.radius, info.depth);
+}
+
+void GameScene::Draw() {
+	ID3D12GraphicsCommandList* cmd = dx_->List();
+
+	// フレーム開始
+	renderer_.BeginFrame(cmd);
+
+	// ここで Compute
+	renderer_.RebuildVoxelIfNeeded(dx_->List());
+	renderer_.DrawVoxel(dx_->List(), *activeCam_);
+
+	// 地面（Plane.obj）を描画
+	if (outerGroundHandle_ >= 0) {
+		renderer_.UpdateModelCBWithColor(outerGroundHandle_, *activeCam_, outerGroundTf_, {1, 1, 1, 1});
+		renderer_.DrawModel(outerGroundHandle_, dx_->List());
+	}
+
+	// ---- 水面 ----
+	if (water_) {
+		water_->Draw(cmd, *activeCam_);
+	}
+
+	// 既存の描画
+	if (gridVisible_) {
+		renderer_.DrawGrid(*activeCam_, cmd);
+	}
+
+	player_.Draw(renderer_, *activeCam_, cmd);
+
+	sparks_.Draw(cmd, *activeCam_);
+
+	if (boss_) {
+		boss_->Draw(renderer_, dx_->List(), *activeCam_);
+	}
+
+	renderer_.DrawSkybox(*activeCam_, cmd);
+
+	testSprite_.Draw();
 
 	renderer_.EndFrame(cmd);
 }

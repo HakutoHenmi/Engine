@@ -13,6 +13,13 @@
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
+static std::wstring AssetFullPath(const std::wstring& rel) {
+	wchar_t buf[MAX_PATH]{};
+	::GetModuleFileNameW(nullptr, buf, MAX_PATH);
+	std::filesystem::path exeDir = std::filesystem::path(buf).parent_path();
+	return (exeDir / rel).wstring();
+}
+
 // ----- HRESULT チェッカー（ThrowIfFailed 代替）-----
 #ifndef HR_CHECK
 #define HR_CHECK(x)                                                                                                                                                                                    \
@@ -50,6 +57,49 @@ SamplerState S:register(s0);
 float4 main(float4 sp:SV_Position, float2 uv:TEXCOORD):SV_Target {
     return T.Sample(S, uv) * col;
 })";
+
+static const char* gVSSkybox = R"(
+cbuffer C0 : register(b0) { float4x4 mvp; float4 col; }
+struct VSIn {
+    float3 pos : POSITION;
+};
+struct VSOut {
+    float4 sp  : SV_Position;
+    float3 dir : TEXCOORD0;
+};
+VSOut main(VSIn i) {
+    VSOut o;
+    // 位置ベクトルをそのままサンプル方向として使う
+    o.dir = i.pos;
+    o.sp  = mul(float4(i.pos, 1.0f), mvp);
+    return o;
+}
+)";
+
+static const char* gPSSkybox = R"(
+cbuffer C0 : register(b0) { float4x4 mvp; float4 col; }
+
+struct PSIn {
+    float4 sp  : SV_Position;
+    float3 dir : TEXCOORD0;
+};
+
+// ★テクスチャを使わず、方向ベクトルだけで空色を作る
+float4 main(PSIn i) : SV_Target
+{
+    float3 d = normalize(i.dir);
+
+    // d.y=-1(真下) ～ +1(真上) を 0～1 にマップ
+    float t = saturate(d.y * 0.5f + 0.5f);
+
+    // 好きな空の色（ここを調整すると雰囲気が変えられる）
+    float3 colBottom = float3(0.30f, 0.60f, 1.00f); // 地平線側
+    float3 colTop    = float3(0.70f, 0.88f, 1.00f); // 天頂側
+
+    float3 sky = lerp(colBottom, colTop, t);
+    return float4(sky, 1.0f);
+}
+)";
 
 // ------------------- Sprite -------------------
 static const char* gVSSprite = R"(
@@ -267,12 +317,27 @@ bool Renderer::Initialize(WindowDX& dx) {
 	InitLaserPSO(dx.Dev(), rs_.Get());
 	InitNeonFramePSO(dx.Dev(), rs_.Get());
 
+	InitSkyboxPSO(dx.Dev());
+	InitSkyboxGeometry(dx.Dev());
+
 	// ==== ここからVoxel初期化 ====
 	InitVoxelCS(dx.Dev());
 	InitVoxelDrawPSO(dx.Dev());
 	voxel_.cbDraw = CreateUploadBuffer(dx.Dev(), 256);
 	// 例: 最大100万頂点（高さ地形なら 512x512 セル → 6頂点/セル = 約1.6M → 適宜調整）
-	CreateVoxelBuffers(dx.Dev(), 600000);
+	constexpr UINT kVoxelGridX = 400;
+	constexpr UINT kVoxelGridZ = 400;
+
+	// 必要頂点数 = gridX * gridZ * 6
+	const UINT maxVerts = kVoxelGridX * kVoxelGridZ * 6;
+	CreateVoxelBuffers(dx.Dev(), maxVerts);
+
+	// ★ グリッド保存
+	voxelGridX_ = kVoxelGridX;
+	voxelGridZ_ = kVoxelGridZ;
+
+	// ★ 初期生成必要
+	voxelDirty_ = true;
 
 	zeroUpload_ = CreateUploadBuffer(dx.Dev(), 4);
 	void* zp = nullptr;
@@ -347,7 +412,7 @@ float h_base(float2 xz)
     const float outerRingRadius  = 100.0;  // ドーナツ枠の外側
     const float pitFloorY        = -4.0;   // 穴の底の高さ
     const float ringY            =  2.5;   // ドーナツ枠の高さ
-    const float outerBaseY       = -2.0;   // 外側の高さ
+    const float outerBaseY       = -8.0;   // 外側の高さ
     const float outerBlendWidth  = 10.0;   // 枠→外のなだらかな繋ぎ幅
 
     float y;
@@ -566,37 +631,46 @@ Texture2D rockTex:register(t2);
 SamplerState S:register(s0);
 
 float4 main(float4 sp:SV_Position, float3 wpos:POSITION, float3 n:NORMAL, float2 uv:TEXCOORD):SV_Target {
+
+    // ===== 高さ基準でレイヤー分け =====
     float h = wpos.y;
-    float t = saturate((h + 3.5) / 7.0); // -3.5～+3.5 の高さ
 
-    // --- 斜面係数（岩をもっと出す）---
-    float slope = 1.0 - saturate(abs(normalize(n).y));  // 垂直→1、水平→0
-    slope = pow(slope, 0.6);  // 少し強調
+    // 好きに調整可能（例）
+    float rockEnd = -2.0;   // 岩 → 土 の境界
+    float dirtEnd =  1.0;   // 土 → 草 の境界
 
-    // --- サンプリング ---
-    float3 cDirt  = dirtTex.Sample(S, uv * 6.0).rgb;
-    float3 cGrass = grassTex.Sample(S, uv * 5.0).rgb;
-    float3 cRock  = rockTex.Sample(S, uv * 8.0).rgb;
+    // ===== 各テクスチャ =====
+    float3 colRock  = rockTex.Sample(S,  uv * 5.0).rgb;
+    float3 colDirt  = dirtTex.Sample(S,  uv * 5.0).rgb;
+    float3 colGrass = grassTex.Sample(S, uv * 5.0).rgb;
 
-    // --- 土→草 ---
-    float gk = smoothstep(0.20, 0.50, t);
-    float3 base = lerp(cDirt, cGrass, gk);
+    // ===== 高さから重み =====
+    // rock:  h < rockEnd
+    float wRock  = 1.0 - smoothstep(rockEnd - 0.5, rockEnd + 0.5, h);
 
-    // --- 草→岩（高所＋斜面で出す）---
-    float rk_h = smoothstep(0.65, 0.85, t);   // 高所の影響を早めに開始
-    float rk_s = smoothstep(0.25, 0.55, slope);
-    float rk = saturate(rk_h + rk_s - rk_h*rk_s); // OR 合成
-    rk = pow(rk, 0.8); // ブレンドを少し滑らかに
+    // grass: h > dirtEnd
+    float wGrass = smoothstep(dirtEnd - 0.5, dirtEnd + 0.5, h);
 
-    float3 mixCol = lerp(base, cRock, rk);
+    // dirt: 残り全部
+    float wDirt = 1.0 - wRock - wGrass;
+    wDirt = saturate(wDirt);
 
-    // --- 照明 ---
+    // 正規化（任意）
+    float s = wRock + wDirt + wGrass + 1e-5;
+    wRock /= s;
+    wDirt /= s;
+    wGrass /= s;
+
+    float3 mixCol = colRock * wRock + colDirt * wDirt + colGrass * wGrass;
+
+    // ===== 簡単なライティング =====
     float3 L = normalize(float3(-0.3, 1.0, -0.5));
     float ndl = saturate(dot(normalize(n), L));
     float3 lit = mixCol * (0.25 + 0.75 * ndl);
 
     return float4(lit, 1);
 }
+
 )",
 	    "main", "ps_5_0");
 
@@ -770,6 +844,16 @@ void Renderer::DispatchVoxel(ID3D12GraphicsCommandList* cmd, UINT gridX, UINT gr
 	}
 }
 
+void Renderer::RebuildVoxelIfNeeded(ID3D12GraphicsCommandList* cmd) {
+	if (!voxelDirty_) {
+		return;
+	}
+
+	// 必要なときだけ再生成
+	DispatchVoxel(cmd, voxelGridX_, voxelGridZ_);
+	voxelDirty_ = false;
+}
+
 UINT Renderer::ReadbackVoxelVertexCount() { return voxel_.counterCpuPtr ? *reinterpret_cast<const UINT*>(voxel_.counterCpuPtr) : 0u; }
 
 void Renderer::DrawVoxel(ID3D12GraphicsCommandList* cmd, const Camera& cam) {
@@ -798,6 +882,44 @@ void Renderer::DrawVoxel(ID3D12GraphicsCommandList* cmd, const Camera& cam) {
 		cmd->SetGraphicsRootDescriptorTable(1, dx_->SRV_GPU(voxel_.texBaseIndex));
 
 	cmd->DrawInstanced(vertCount, 1, 0, 0);
+}
+
+void Renderer::DrawSkybox(const Camera& cam, ID3D12GraphicsCommandList* cmd) {
+	if (!cmd || !skybox_.vb || !skybox_.cb || !rsSkybox_ || !psoSkybox_)
+		return;
+
+	// テクスチャは使わないので EnsureSkyboxTexture は呼ばなくてよい
+
+	// ==== CB 設定 ====
+	CBCommon cb{};
+	cb.col = XMFLOAT4(1, 1, 1, 1);
+
+	XMMATRIX w = XMMatrixScaling(1000.0f, 1000.0f, 1000.0f);
+
+	XMMATRIX v0 = cam.View();
+	XMFLOAT4X4 vm;
+	XMStoreFloat4x4(&vm, v0);
+	vm._41 = vm._42 = vm._43 = 0.0f;
+	XMMATRIX v = XMLoadFloat4x4(&vm);
+
+	XMMATRIX p = XMMatrixPerspectiveFovLH(XMConvertToRadians(60.0f), 1280.0f / 720.0f, 0.1f, 10000.0f);
+
+	XMStoreFloat4x4(&cb.mvp, XMMatrixTranspose(w * v * p));
+
+	void* mapped;
+	skybox_.cb->Map(0, nullptr, &mapped);
+	memcpy(mapped, &cb, sizeof(cb));
+	skybox_.cb->Unmap(0, nullptr);
+
+	cmd->SetGraphicsRootSignature(rsSkybox_.Get());
+	cmd->SetPipelineState(psoSkybox_.Get());
+	cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	cmd->IASetVertexBuffers(0, 1, &skybox_.vbv);
+
+	cmd->SetGraphicsRootConstantBufferView(0, skybox_.cb->GetGPUVirtualAddress());
+
+	// ★SRV テーブルは存在しないので SetGraphicsRootDescriptorTable(1, ...) は削除
+	cmd->DrawInstanced(36, 1, 0, 0);
 }
 
 void Renderer::Shutdown() {
@@ -1125,6 +1247,7 @@ void Renderer::BeginFrame(ID3D12GraphicsCommandList* cmd) {
 	ID3D12DescriptorHeap* heaps[] = {srvHeap_.Get()};
 	cmd->SetDescriptorHeaps(1, heaps);
 }
+
 void Renderer::EndFrame(ID3D12GraphicsCommandList* /*cmd*/) {}
 // void Renderer::BeginFrame(WindowDX& dx, bool useBallTex) {
 //	// WindowDXのフレーム開始
@@ -1663,6 +1786,190 @@ void Renderer::DrawModelAt(int handle, ID3D12GraphicsCommandList* cmd, size_t sl
 	cmd->DrawInstanced((UINT)m.model->GetVertexCount(), 1, 0, 0);
 }
 
+bool Renderer::InitSkyboxPSO(ID3D12Device* dev) {
+	CD3DX12_ROOT_PARAMETER rp[1];
+	rp[0].InitAsConstantBufferView(0); // b0
+
+	CD3DX12_ROOT_SIGNATURE_DESC rsd;
+	rsd.Init(1, rp, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	ComPtr<ID3DBlob> sig, err;
+	HR_CHECK(D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+	HR_CHECK(dev->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(), IID_PPV_ARGS(&rsSkybox_)));
+
+	// シェーダコンパイル
+	auto vs = Compile(gVSSkybox, "main", "vs_5_0");
+	auto ps = Compile(gPSSkybox, "main", "ps_5_0");
+
+	D3D12_INPUT_ELEMENT_DESC il[] = {
+	    {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};
+	d.pRootSignature = rsSkybox_.Get();
+	d.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+	d.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+	d.InputLayout = {il, _countof(il)};
+	d.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	d.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	// カメラの内側から見るのでカリングなし
+	d.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+
+	d.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	// 3Dオブジェクトの「あと」に描く想定なので、Z は TEST のみ（書き込まない）
+	d.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+	d.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+	d.SampleMask = UINT_MAX;
+	d.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	d.NumRenderTargets = 1;
+	d.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	d.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+	d.SampleDesc.Count = 1;
+
+	return SUCCEEDED(dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&psoSkybox_)));
+}
+
+bool Renderer::InitSkyboxGeometry(ID3D12Device* dev) {
+	// 単純なキューブ（-1〜1）の36頂点（インデックスバッファなし）
+	struct SkyboxVertex {
+		DirectX::XMFLOAT3 pos;
+	};
+
+	const float s = 1.0f;
+	const SkyboxVertex verts[] = {
+	    // +X
+	    {{s, -s, -s}},
+	    {{s, s, -s}},
+	    {{s, s, s}},
+	    {{s, -s, -s}},
+	    {{s, s, s}},
+	    {{s, -s, s}},
+	    // -X
+	    {{-s, -s, s}},
+	    {{-s, s, s}},
+	    {{-s, s, -s}},
+	    {{-s, -s, s}},
+	    {{-s, s, -s}},
+	    {{-s, -s, -s}},
+	    // +Y
+	    {{-s, s, -s}},
+	    {{-s, s, s}},
+	    {{s, s, s}},
+	    {{-s, s, -s}},
+	    {{s, s, s}},
+	    {{s, s, -s}},
+	    // -Y
+	    {{-s, -s, s}},
+	    {{-s, -s, -s}},
+	    {{s, -s, -s}},
+	    {{-s, -s, s}},
+	    {{s, -s, -s}},
+	    {{s, -s, s}},
+	    // +Z
+	    {{-s, -s, s}},
+	    {{s, -s, s}},
+	    {{s, s, s}},
+	    {{-s, -s, s}},
+	    {{s, s, s}},
+	    {{-s, s, s}},
+	    // -Z
+	    {{s, -s, -s}},
+	    {{-s, -s, -s}},
+	    {{-s, s, -s}},
+	    {{s, -s, -s}},
+	    {{-s, s, -s}},
+	    {{s, s, -s}},
+	};
+
+	UINT vbSize = static_cast<UINT>(sizeof(verts));
+
+	CD3DX12_HEAP_PROPERTIES hpU(D3D12_HEAP_TYPE_UPLOAD);
+	auto rdV = CD3DX12_RESOURCE_DESC::Buffer(vbSize);
+	HR_CHECK(dev->CreateCommittedResource(&hpU, D3D12_HEAP_FLAG_NONE, &rdV, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&skybox_.vb)));
+
+	void* p = nullptr;
+	skybox_.vb->Map(0, nullptr, &p);
+	std::memcpy(p, verts, vbSize);
+	skybox_.vb->Unmap(0, nullptr);
+
+	skybox_.vbv.BufferLocation = skybox_.vb->GetGPUVirtualAddress();
+	skybox_.vbv.SizeInBytes = vbSize;
+	skybox_.vbv.StrideInBytes = sizeof(SkyboxVertex);
+
+	// CB (MVP 用)
+	skybox_.cb = CreateUploadBuffer(dev, sizeof(CBCommon));
+
+	return true;
+}
+
+void Renderer::EnsureSkyboxTexture(ID3D12GraphicsCommandList* cmd) {
+	if (skybox_.texInitialized)
+		return;
+
+	if (!dx_)
+		return;
+
+	ID3D12Device* dev = dx_->Dev();
+
+	// 読み込む 6 面のファイル（※パスは自分の環境に合わせて変更）
+	const std::wstring faces[6] = {
+	    L"Resources/Skybox/sky_posx.png", L"Resources/Skybox/sky_negx.png", L"Resources/Skybox/sky_posy.png",
+	    L"Resources/Skybox/sky_negy.png", L"Resources/Skybox/sky_posz.png", L"Resources/Skybox/sky_negz.png",
+	};
+
+	DirectX::ScratchImage images[6];
+	DirectX::TexMetadata meta{};
+	for (int i = 0; i < 6; ++i) {
+		std::wstring full = AssetFullPath(faces[i]);
+		HRESULT hr = LoadFromWICFile(full.c_str(), DirectX::WIC_FLAGS_FORCE_SRGB, &meta, images[i]);
+		if (FAILED(hr)) {
+			OutputDebugStringA("Skybox face load failed\n");
+			return;
+		}
+		if (i == 0) {
+			// 1枚目のメタデータを基準にする
+		}
+		// サイズやフォーマットをチェックしたければここで判定
+	}
+
+	// テクスチャキューブ作成
+	CD3DX12_HEAP_PROPERTIES hpD(D3D12_HEAP_TYPE_DEFAULT);
+	auto rdTex = CD3DX12_RESOURCE_DESC::Tex2D(meta.format, meta.width, static_cast<UINT>(meta.height), 6, 1);
+	HR_CHECK(dev->CreateCommittedResource(&hpD, D3D12_HEAP_FLAG_NONE, &rdTex, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&skybox_.tex)));
+
+	UINT64 uploadSize = GetRequiredIntermediateSize(skybox_.tex.Get(), 0, 6);
+	CD3DX12_HEAP_PROPERTIES hpU(D3D12_HEAP_TYPE_UPLOAD);
+	auto rdUp = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
+	HR_CHECK(dev->CreateCommittedResource(&hpU, D3D12_HEAP_FLAG_NONE, &rdUp, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&skybox_.texUpload)));
+
+	std::vector<D3D12_SUBRESOURCE_DATA> subs(6);
+	for (int i = 0; i < 6; ++i) {
+		const auto* img = images[i].GetImages();
+		subs[i].pData = img->pixels;
+		subs[i].RowPitch = static_cast<LONG_PTR>(img->rowPitch);
+		subs[i].SlicePitch = static_cast<LONG_PTR>(img->slicePitch);
+	}
+
+	// ここでは App 側で BeginFrame 済みなので、cmd はオープン状態のはず
+	UpdateSubresources(cmd, skybox_.tex.Get(), skybox_.texUpload.Get(), 0, 0, 6, subs.data());
+	auto bar = CD3DX12_RESOURCE_BARRIER::Transition(skybox_.tex.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+	cmd->ResourceBarrier(1, &bar);
+
+	// SRV を Renderer の SRV ヒープに作成
+	if (skybox_.srvIndex < 0) {
+		skybox_.srvIndex = AllocateSRV();
+	}
+	D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
+	sv.Format = meta.format;
+	sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+	sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	sv.TextureCube.MipLevels = 1;
+	dev->CreateShaderResourceView(skybox_.tex.Get(), &sv, GetSRVCPU(skybox_.srvIndex));
+
+	skybox_.texInitialized = true;
+}
+
 bool Renderer::InitNeonFramePSO(ID3D12Device* device, ID3D12RootSignature* rs) {
 	auto vs = Compile(gVSObj, "main", "vs_5_0");       // 既存のモデルVSを流用
 	auto ps = Compile(gPSNeonFrame, "main", "ps_5_0"); // ネオン枠PS
@@ -1853,7 +2160,7 @@ static inline float VoxelHeightFunc_CPU(float x, float z, float amp, float freq)
 	const float outerRingRadius = 100.0f;
 	const float pitFloorY = -4.0f;
 	const float ringY = 2.5f; // 岩の高さ
-	const float outerBaseY = -2.0f;
+	const float outerBaseY = -8.0f;
 	const float outerBlendWidth = 10.0f;
 
 	float y;
@@ -1874,6 +2181,7 @@ static inline float VoxelHeightFunc_CPU(float x, float z, float amp, float freq)
 
 void Renderer::AddTerrainDent(const DirectX::XMFLOAT3& position, float radius, float depth) {
 	auto& vox = voxel_;
+	voxelDirty_ = true;
 	if (vox.dentCount >= VoxelGPU::kMaxDents) {
 		// いっぱいになったら、とりあえずこれ以上追加しない（必要なら上書きロジックにする）
 		OutputDebugStringA("AddTerrainDent: kMaxDents reached, skipping.\n");
