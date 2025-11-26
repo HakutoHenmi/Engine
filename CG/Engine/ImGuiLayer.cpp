@@ -1,11 +1,10 @@
 #include "ImGuiLayer.h"
-#include "imgui.h"
 #include "imgui_impl_dx12.h"
 #include "imgui_impl_win32.h"
 
 namespace Engine {
 
-bool ImGuiLayer::Initialize(HWND hwnd, WindowDX& dx) {
+bool ImGuiLayer::Initialize(HWND hwnd, WindowDX& dx, float jpFontSize, const char* jpFontPath) {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
@@ -18,6 +17,16 @@ bool ImGuiLayer::Initialize(HWND hwnd, WindowDX& dx) {
 	desc.NodeMask = 0;
 	if (FAILED(dx.Dev()->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&imguiHeap_)))) {
 		return false;
+	}
+
+	// フォント（日本語＋既定）
+	ImGuiIO& io = ImGui::GetIO();
+	// 既定フォントはImGui内部のデフォルトを使いつつ…
+	fontDefault_ = io.FontDefault;
+	// 日本語フォントを追加
+	fontJP_ = io.Fonts->AddFontFromFileTTF(jpFontPath, jpFontSize, nullptr, io.Fonts->GetGlyphRangesJapanese());
+	if (fontJP_) {
+		io.FontDefault = fontJP_; // 既定を日本語フォントに
 	}
 
 	auto cpu = imguiHeap_->GetCPUDescriptorHandleForHeapStart();

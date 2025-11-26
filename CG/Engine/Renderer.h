@@ -76,9 +76,16 @@ public:
 	D3D12_CPU_DESCRIPTOR_HANDLE GetSRVCPU(int index) const;
 	D3D12_GPU_DESCRIPTOR_HANDLE GetSRVGPU(int index) const;
 
+	bool InitSkyboxGeometry(ID3D12Device* dev);
+	bool InitSkyboxPSO(ID3D12Device* dev);
+	void EnsureSkyboxTexture(ID3D12GraphicsCommandList* cmd);
+
 	// モデル：多スロットCB
 	void UpdateModelCBWithColorAt(int handle, size_t slot, const Camera& cam, const Transform& tf, const Vector4& mulColor);
 	void DrawModelAt(int handle, ID3D12GraphicsCommandList* cmd, size_t slot);
+
+	// カメラを使ってスカイボックスを描画する
+	void DrawSkybox(const Camera& cam, ID3D12GraphicsCommandList* cmd);
 
 	// Grid（Unity風シーングリッド）
 	bool InitGrid(WindowDX& dx, int half = 30, float cell = 1.0f, float y = 0.0f, float phaseX = 0.0f, float phaseZ = 0.0f);
@@ -198,6 +205,10 @@ public: // （外からも参照することが多いので public に）
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoNeonFrame_;
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoLaser_;
 
+	// === ここから追加: Skybox 用 RS / PSO ===
+	Microsoft::WRL::ComPtr<ID3D12RootSignature> rsSkybox_;
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> psoSkybox_;
+
 	// 実行時設定
 	WindowDX* dx_ = nullptr;
 	BlendMode blendMode_ = BlendMode::Opaque;
@@ -251,7 +262,8 @@ public: // （外からも参照することが多いので public に）
 			float depth;                // 深さ（正の値、下方向にへこませる）
 		};
 
-		static constexpr UINT kMaxDents = 32;
+		// 凹み回数上限
+		static constexpr UINT kMaxDents = 1000;
 
 		Dent dents[kMaxDents]{}; // 登録済み凹み
 		UINT dentCount = 0;      // 有効な凹み数
@@ -270,6 +282,33 @@ public: // （外からも参照することが多いので public に）
 			Dent dents[kMaxDents];
 		} params{};
 	} voxel_;
+
+	// === Voxel Dirty フラグ（地形再生成が必要か？） ===
+	bool voxelDirty_ = true;
+	UINT voxelGridX_ = 0;
+	UINT voxelGridZ_ = 0;
+
+	// DispatchVoxel を必要な時だけ行う
+	void RebuildVoxelIfNeeded(ID3D12GraphicsCommandList* cmd);
+
+	struct SkyboxData {
+		// 頂点バッファ（キューブ形状）
+		Microsoft::WRL::ComPtr<ID3D12Resource> vb;
+		D3D12_VERTEX_BUFFER_VIEW vbv{};
+
+		// 定数バッファ（MVP 行列）
+		Microsoft::WRL::ComPtr<ID3D12Resource> cb;
+
+		// キューブマップテクスチャ本体とアップロード用
+		Microsoft::WRL::ComPtr<ID3D12Resource> tex;
+		Microsoft::WRL::ComPtr<ID3D12Resource> texUpload;
+
+		// SRV のインデックス（Renderer の SRV ヒープ上）
+		int srvIndex = -1;
+
+		// テクスチャのアップロードが終わっているかどうか
+		bool texInitialized = false;
+	} skybox_;
 
 	// 現在のボクセル地形パラメータから、任意XZにおける高さ/法線を返す
 	float TerrainHeightAt(float x, float z) const;

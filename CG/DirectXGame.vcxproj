@@ -185,6 +185,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClCompile Include="Engine\SceneManager.cpp" />
     <ClCompile Include="Engine\SpriteRenderer.cpp" />
     <ClCompile Include="Engine\TextureManager.cpp" />
+    <ClCompile Include="Engine\Water\WaterSurface.cpp" />
     <ClCompile Include="Engine\WindowDX.cpp" />
     <ClCompile Include="externals\imgui\imgui.cpp" />
     <ClCompile Include="externals\imgui\imgui_demo.cpp" />
@@ -325,6 +326,7 @@ xcopy /E /Y "$(ProjectDir)Resources" "$(OutDir)Resources\"
     <ClInclude Include="Engine\SpriteRenderer.h" />
     <ClInclude Include="Engine\TextureManager.h" />
     <ClInclude Include="Engine\Transform.h" />
+    <ClInclude Include="Engine\Water\WaterSurface.h" />
     <ClInclude Include="Engine\WindowDX.h" />
     <ClInclude Include="externals\imgui\imconfig.h" />
     <ClInclude Include="externals\imgui\imgui.h" />
