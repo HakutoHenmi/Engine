@@ -356,7 +356,7 @@ void GameScene::Update() {
 		if (rightPressed) {
 			// 緊急回避用のエフェクト（少し弱めに）
 			Engine::Vector3 pos = player_.GetPos();
-			pos.y += 0.3f;
+			pos.y += 4.0f;
 			sparks_.SetPosition(pos);
 			sparks_.Burst(256);
 
@@ -445,12 +445,11 @@ void GameScene::Update() {
 }
 
 void GameScene::DrawImGui_() {
-#ifdef _DEBUG
-	// ==== ImGui FPS カウンター ====
+	// #ifdef _DEBUG
+	//  ==== ImGui FPS カウンター（左上） ====
 	ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always); // 画面左上固定
 	ImGui::SetNextWindowBgAlpha(0.35f);                        // 半透明背景
 
-	// 文字やパディングを少し大きくする
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
 	ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));        // 白文字
 	ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0.6f)); // 濃い背景
@@ -460,7 +459,6 @@ void GameScene::DrawImGui_() {
 
 	ImGui::Begin("FPSOverlay", nullptr, flags);
 
-	// このウィンドウ内だけフォントを少し拡大
 	ImGui::SetWindowFontScale(1.4f);
 	ImGui::Text("FPS : %5.1f", fps_);
 	ImGui::SetWindowFontScale(1.0f);
@@ -469,8 +467,35 @@ void GameScene::DrawImGui_() {
 
 	ImGui::PopStyleColor(2);
 	ImGui::PopStyleVar();
-	// ==============================
-#endif // _DEBUG
+
+	// ==== 操作説明（右上） ====
+	{
+		ImGuiIO& io = ImGui::GetIO();
+
+		// 右上に固定（pivot を (1,0) にして右端基準にする）
+		const ImVec2 margin(10.0f, 10.0f);
+		ImVec2 pos(io.DisplaySize.x - margin.x, margin.y);
+		ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+		ImGui::SetNextWindowBgAlpha(0.35f);
+
+		ImGuiWindowFlags helpFlags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
+
+		ImGui::Begin("操作説明", nullptr, helpFlags);
+
+		ImGui::Text("操作説明");
+		ImGui::Separator();
+		ImGui::Text("1. WASD で移動");
+		ImGui::Text("2. マウスで視点操作");
+		ImGui::Text("3. Space キーでジャンプ");
+		ImGui::Text("4. 左クリックで剣を振る");
+		ImGui::Text("5. 右クリックで緊急回避");
+		ImGui::Text("6. マウスホイールでカメラ距離の調整");
+		ImGui::Text("7. F2 でグリッド線の ON/OFF");
+		ImGui::Text("8. ESC でゲーム終了 ");
+
+		ImGui::End();
+	}
+	// #endif // _DEBUG
 }
 
 void GameScene::ApplyBossHitToTerrain_(const Game::TerrainHitInfo& info) {
