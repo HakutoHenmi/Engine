@@ -62,7 +62,7 @@ private:
 	Transform transform_;         // 位置・回転・スケール
 	const Camera* cam_ = nullptr; // カメラ参照用
 	int modelHandle_ = -1;        // モデルハンドル
-	float speed_ = 0.1f;          // 移動速度
+	float speed_ = 0.5f;          // 移動速度
 	int hp_ = 3;
 
 	Vector3 lastMoveDir_{0, 0, 1}; // 最後に移動した方向（初期はZ+）

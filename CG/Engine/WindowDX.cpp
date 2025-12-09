@@ -90,7 +90,7 @@ bool WindowDX::Initialize(HINSTANCE hInst, int cmdShow, HWND& outHwnd) {
 
 	RECT rc{0, 0, (LONG)kW, (LONG)kH};
 	AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-	hwnd_ = CreateWindowW(kClass, L"DirectX12 Sample", WS_OVERLAPPEDWINDOW, CW_USE_DEFAULT, CW_USE_DEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInst, nullptr);
+	hwnd_ = CreateWindowW(kClass, L"LE2B_22_ヘンミ_ハクト", WS_OVERLAPPEDWINDOW, CW_USE_DEFAULT, CW_USE_DEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInst, nullptr);
 	if (!hwnd_)
 		return false;
 	ShowWindow(hwnd_, cmdShow);
