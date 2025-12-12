@@ -106,6 +106,16 @@ void GameScene::Initialize(WindowDX* dx) {
 	p.initVelMax = {+1.6f, 5.0f, +1.6f};
 	p.spawnPosJitter = {0.40f, 0.60f, 0.40f};
 
+	// Fキー用：自動放出レート（お好みで調整）
+	p.emitRate = 120.0f;           // 1秒あたり 120 個くらい
+	sparks_.EnableAutoEmit(false); // 最初はOFF
+	particleAutoEmit_ = false;
+	particleWindOn_ = false;
+
+	// 風OFF時の“元の速度”を保存
+	sparkVelBaseMin_ = p.initVelMin;
+	sparkVelBaseMax_ = p.initVelMax;
+
 	// UIの初期化
 
 	// テストスプライト
@@ -364,6 +374,35 @@ void GameScene::Update() {
 			// ここで Player に「回避入力」を伝えるようにしてください。
 		}
 
+		// Fキー：プレイヤーから常時パーティクルを出す ON/OFF
+		if (input_.Trigger(DIK_F)) {
+			particleAutoEmit_ = !particleAutoEmit_;
+			sparks_.EnableAutoEmit(particleAutoEmit_);
+		}
+
+		// ONの間はエミッタ位置をプレイヤーに追従させる
+		if (particleAutoEmit_) {
+			Engine::Vector3 pos = player_.GetPos();
+			pos.y += 0.8f; // 頭の少し上くらいから出す
+			sparks_.SetPosition(pos);
+		}
+
+		// Gキー：風のON/OFF（見てすぐ分かるように +X 方向に強く吹かせる）
+		if (input_.Trigger(DIK_G)) {
+			particleWindOn_ = !particleWindOn_;
+
+			auto& params = sparks_.Params();
+			if (particleWindOn_) {
+				// 風ON：横方向成分をかなり強くする
+				params.initVelMin = {8.0f, 2.0f, 0.0f};
+				params.initVelMax = {12.0f, 4.0f, 0.5f};
+			} else {
+				// 風OFF：元のバラバラな速度に戻す
+				params.initVelMin = sparkVelBaseMin_;
+				params.initVelMax = sparkVelBaseMax_;
+			}
+		}
+
 		// === TPS遅延カメラ（相対マウス入力 / 画面端でも止まらない） ===
 		if (!useDebugCam_) {
 			using namespace DirectX;
@@ -434,11 +473,11 @@ void GameScene::Update() {
 			camPlay_.LookAt(lookAt, XMFLOAT3{0, 1, 0});
 		}
 
-		// === シーン遷移（Gキーで切替） ===
-		if (input_.Trigger(DIK_G)) {
-			end_ = true;
-			next_ = "Result";
-		}
+		//// === シーン遷移（Gキーで切替） ===
+		// if (input_.Trigger(DIK_G)) {
+		//	end_ = true;
+		//	next_ = "Result";
+		// }
 
 		sparks_.Update(1.0f / 60.0f);
 	}
@@ -490,8 +529,10 @@ void GameScene::DrawImGui_() {
 		ImGui::Text("4. 左クリックで剣を振る");
 		ImGui::Text("5. 右クリックで緊急回避");
 		ImGui::Text("6. マウスホイールでカメラ距離の調整");
-		ImGui::Text("7. F2 でグリッド線の ON/OFF");
-		ImGui::Text("8. ESC でゲーム終了 ");
+		ImGui::Text("7. Fキーで常時パーティクル出力");
+		ImGui::Text("8. Gキーで風を吹かせる");
+		ImGui::Text("9. F2 でグリッド線の ON/OFF");
+		ImGui::Text("10. ESC でゲーム終了 ");
 
 		ImGui::End();
 	}

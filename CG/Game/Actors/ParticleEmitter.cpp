@@ -19,12 +19,10 @@ void ParticleEmitter::Burst(int count) {
 	count = (std::min)(count, params_.maxOnce * 4); // 安全上限
 
 	for (int i = 0; i < count; ++i) {
-		// ★ ちゃんと宣言する（未定義エラー対策）
 		Engine::Vector3 v = RandV3(params_.initVelMin, params_.initVelMax);
 		Engine::Vector3 scl = RandV3(params_.initScaleMin, params_.initScaleMax);
 		float life = RandF(params_.lifeMin, params_.lifeMax);
 
-		// ★ 位置は “足し算” を逐次代入で（初期化子の多すぎ問題も回避）
 		Engine::Vector3 p = position_;
 		if (params_.spawnPosJitter.x != 0.0f || params_.spawnPosJitter.y != 0.0f || params_.spawnPosJitter.z != 0.0f) {
 			p.x += RandF(-params_.spawnPosJitter.x, +params_.spawnPosJitter.x);
@@ -32,9 +30,20 @@ void ParticleEmitter::Burst(int count) {
 			p.z += RandF(-params_.spawnPosJitter.z, +params_.spawnPosJitter.z);
 		}
 
-		// 発生
+		// ★風が有効なら、速度に風の成分を加算して吹き飛ばす
+		if (windEnabled_) {
+			v.x += windDir_.x * windStrength_;
+			v.y += windDir_.y * windStrength_;
+			v.z += windDir_.z * windStrength_;
+		}
+
 		sys_.Emit(p, v, scl, params_.initColor, life);
 	}
+}
+
+void ParticleEmitter::SetWind(const Engine::Vector3& dir, float strength) {
+	windDir_ = dir;
+	windStrength_ = strength;
 }
 
 void ParticleEmitter::Update(float dt) {
