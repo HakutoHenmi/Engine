@@ -64,6 +64,11 @@ public:
 	// 外部から任意のタイミングでまとめて発生
 	void Burst(int count);
 
+	// 風の設定（方向と強さ）
+	void SetWind(const Engine::Vector3& dir, float strength);
+	// ON/OFFだけ切り替えたい時用
+	void EnableWind(bool enable) { windEnabled_ = enable; }
+
 	// 毎フレーム
 	void Update(float dt);
 	void Draw(ID3D12GraphicsCommandList* cmd, const Engine::Camera& cam);
@@ -86,6 +91,10 @@ private:
 	Engine::Vector3 RandV3(const Engine::Vector3& mn, const Engine::Vector3& mx) { return {RandF(mn.x, mx.x), RandF(mn.y, mx.y), RandF(mn.z, mx.z)}; }
 
 	EmitterParams params_{};
+
+	Engine::Vector3 windDir_{1.0f, 0.0f, 0.0f};
+	float windStrength_ = 0.0f;
+	bool windEnabled_ = false;
 };
 
 } // namespace Game

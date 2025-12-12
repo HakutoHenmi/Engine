@@ -30,6 +30,16 @@ public:
 	int outerGroundHandle_ = -1;
 	Engine::Transform outerGroundTf_;
 
+	// Fキー：プレイヤーから常時パーティクルを出す ON/OFF
+	bool particleAutoEmit_ = false;
+
+	// Gキー：風の ON/OFF
+	bool particleWindOn_ = false;
+
+	// 風OFF時の“元の速度パラメータ”を保存しておく
+	Engine::Vector3 sparkVelBaseMin_{};
+	Engine::Vector3 sparkVelBaseMax_{};
+
 	bool IsEnd() const override { return end_; }
 	std::string Next() const override { return next_; }
 
@@ -91,11 +101,10 @@ private:
 	bool prevRB_ = false; // 右クリックの前フレーム状態
 	bool cursorFree_ = false;
 
-	// ==== FPS 計測用 ====
+	// == FPS 計測用 ==
 	float fps_ = 0.0f;
 	int fpsFrameCount_ = 0;
 	std::chrono::steady_clock::time_point fpsLastTime_;
-
 };
 
 } // namespace Engine
