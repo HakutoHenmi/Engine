@@ -39,23 +39,6 @@ jobs:
           msbuild $dxproj.Name /p:Platform=${{ env.APP_PLATFORM }} /p:Configuration=${{ env.APP_CONFIG }} /m
           Pop-Location
 
-      - name: Make Development alias for DirectXTex (use matching config)
-        shell: pwsh
-        run: |
-          $binRoot = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Directory -Filter Bin |
-            Where-Object { $_.FullName -match 'DirectXTex\\Bin$' } |
-            Select-Object -First 1
-          if (-not $binRoot) { throw "DirectXTex\\Bin not found." }
-
-          $lib = Get-ChildItem -Path $binRoot.FullName -Recurse -Filter DirectXTex.lib |
-              Where-Object { $_.FullName -match '\\${{ env.APP_PLATFORM }}\\' -and $_.FullName -match "\\${{ env.APP_CONFIG }}\\" } |
-              Select-Object -First 1
-          if (-not $lib) { throw "DirectXTex.lib (${{ env.APP_PLATFORM }}/${{ env.APP_CONFIG }}) not found." }
-
-          $devDir = Join-Path (Split-Path $lib.DirectoryName -Parent) 'Development'
-          New-Item -ItemType Directory -Force -Path $devDir | Out-Null
-          Copy-Item -Force $lib.FullName (Join-Path $devDir 'DirectXTex.lib')
-
       - name: Locate solution & build (${{ env.APP_CONFIG }} ${{ env.APP_PLATFORM }})
         shell: pwsh
         run: |
