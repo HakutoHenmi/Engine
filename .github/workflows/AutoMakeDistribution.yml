@@ -1,0 +1,49 @@
+name: CheckUnwantedFiles
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+env:
+  UNWANTED_NAME_PATTERNS: >
+    *.pdb *.ilk *.user *.ncb *.suo *.log *.dmp
+    imgui.ini desktop.ini dxcompiler.dll dxil.dll
+  UNWANTED_DIR_PATTERNS: >
+    generated x64 win32 arm64 .vs bin ipch logs Dump
+
+jobs:
+  check-files:
+    name: 不要なファイルを検索
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 不要ファイルとディレクトリを検索
+        run: |
+          DIR_CONDITIONS=()
+          for p in $UNWANTED_DIR_PATTERNS; do
+            DIR_CONDITIONS+=(-o -name "$p")
+          done
+          unset DIR_CONDITIONS[0]
+
+          NAME_CONDITIONS=()
+          for p in $UNWANTED_NAME_PATTERNS; do
+            NAME_CONDITIONS+=(-o -iname "$p")
+          done
+          unset NAME_CONDITIONS[0]
+
+          UNWANTED_LIST=$(find . \
+            -path ./.git -prune -o \
+            \( \( "${DIR_CONDITIONS[@]}" \) -a -type d -print -prune \) -o \
+            \( \( "${NAME_CONDITIONS[@]}" \) -a -type f -print \))
+
+          if [ -n "$UNWANTED_LIST" ]; then
+            echo "::error::不要なファイルが見つかりました"
+            echo "$UNWANTED_LIST"
+            exit 1
+          fi
+
+          echo "リポジトリはクリーンです"
