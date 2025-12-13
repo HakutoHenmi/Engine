@@ -47,30 +47,6 @@ jobs:
           msbuild $dxproj.Name /p:Platform=${{ env.APP_PLATFORM }} /p:Configuration=${{ env.APP_CONFIG }} /m
           Pop-Location
 
-      # --- 同じ構成の lib を Development へコピー（エイリアス作成）---
-      - name: Make Development alias for DirectXTex (use matching config)
-        shell: pwsh
-        run: |
-          # DirectXTex\Bin を探索
-          $binRoot = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Directory -Filter Bin |
-            Where-Object { $_.FullName -match 'DirectXTex\\Bin$' } |
-            Select-Object -First 1
-          if (-not $binRoot) { throw "DirectXTex\\Bin not found." }
-
-          # 構成一致の lib を取得
-          $lib = Get-ChildItem -Path $binRoot.FullName -Recurse -Filter DirectXTex.lib |
-              Where-Object { $_.FullName -match '\\${{ env.APP_PLATFORM }}\\' -and $_.FullName -match "\\${{ env.APP_CONFIG }}\\" } |
-              Select-Object -First 1
-          if (-not $lib) {
-            Write-Host "Found DirectXTex.lib list for debug:"
-            Get-ChildItem -Path $binRoot.FullName -Recurse -Filter DirectXTex.lib | ForEach-Object { $_.FullName }
-            throw "DirectXTex.lib (${{ env.APP_PLATFORM }}/${{ env.APP_CONFIG }}) not found."
-          }
-          $devDir = Join-Path (Split-Path $lib.DirectoryName -Parent) 'Development'
-          New-Item -ItemType Directory -Force -Path $devDir | Out-Null
-          Copy-Item -Force $lib.FullName (Join-Path $devDir 'DirectXTex.lib')
-          Write-Host "Aliased: $($lib.FullName) -> $devDir\\DirectXTex.lib"
-
       # --- .sln を探索して同じ構成でビルド ---
       - name: Locate solution & build (${{ env.APP_CONFIG }} ${{ env.APP_PLATFORM }})
         shell: pwsh
