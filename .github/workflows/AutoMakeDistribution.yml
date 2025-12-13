@@ -1,4 +1,4 @@
-name: CheckUnwantedFiles
+name: AutoMakeDistribution
 
 on:
   workflow_dispatch:
